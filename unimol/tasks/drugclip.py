@@ -1641,7 +1641,6 @@ class DrugCLIP(UnicoreTask):
                 dist = sample["net_input"]["pocket_src_distance"]
                 et = sample["net_input"]["pocket_src_edge_type"]
                 st = sample["net_input"]["pocket_src_tokens"]
-                print(st)
                 pocket_padding_mask = st.eq(model.pocket_model.padding_idx)
                 pocket_x = model.pocket_model.embed_tokens(st)
                 n_node = dist.size(-1)
@@ -1659,37 +1658,15 @@ class DrugCLIP(UnicoreTask):
                 pocket_emb = pocket_emb.detach().cpu().numpy()
                 pocket_name = sample["pocket_name"]
                 pocket_names.extend(pocket_name)
-                #pocket_reps.append(pocket_emb)
-                # find all index that st is > 3
-                index = st > 3
+                pocket_reps.append(pocket_emb)
 
-                index = index.squeeze(0)
-
-                print(index.shape)
-
-                # index is the second 
-
-                cur_pocket_reps = pocket_outputs[0]
-
-                cur_pocket_reps = cur_pocket_reps[:, index, :]
-
-                pocket_reps.append(cur_pocket_reps.detach().cpu().numpy())
-
-               
-            pocket_reps = np.concatenate(pocket_reps, axis=0)
+            pocket_reps = np.concatenate(pocket_reps, axis=0)   # (n_pockets, hidden)
             pocket_reps = pocket_reps.astype(np.float32)
+            pocket_reps = np.expand_dims(pocket_reps, axis=1)   # (n_pockets, 1, hidden)
             pocket_reps_all.append(pocket_reps)
 
-        
-        pocket_reps_all = np.concatenate(pocket_reps_all, axis=0)
-
-        # change the first and second dimension
-
-        pocket_reps_all = pocket_reps_all.transpose(1, 0, 2)
-
-        # merge the second and third dimension
-
-
+        # concatenate along fold axis -> (n_pockets, n_folds, hidden)
+        pocket_reps_all = np.concatenate(pocket_reps_all, axis=1)
 
         print(pocket_reps_all.shape)
 
