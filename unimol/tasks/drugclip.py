@@ -1624,15 +1624,17 @@ class DrugCLIP(UnicoreTask):
         pocket_reps_all = []
         pocket_names_all = []
 
+        # load pocket dataset once outside the fold loop to avoid re-opening the same lmdb environment
+        pocket_dataset = self.load_pockets_dataset(pocket_path)
+        logger.info(f"dataloader workers: {self.args.num_workers}")
+        pocket_data = torch.utils.data.DataLoader(pocket_dataset, batch_size=32, collate_fn=pocket_dataset.collater, num_workers=self.args.num_workers)
+
         for fold, ckpt in enumerate(ckpts):
 
             state = checkpoint_utils.load_checkpoint_to_cpu(ckpt)
             model.load_state_dict(state["model"], strict=False)
 
             # generate pocket data
-            pocket_dataset = self.load_pockets_dataset(pocket_path)
-            logger.info(f"dataloader workers: {self.args.num_workers}")
-            pocket_data = torch.utils.data.DataLoader(pocket_dataset, batch_size=32, collate_fn=pocket_dataset.collater, num_workers=self.args.num_workers)
             pocket_reps = []
             pocket_names = []
             for _, sample in enumerate(tqdm(pocket_data)):
@@ -1702,29 +1704,29 @@ class DrugCLIP(UnicoreTask):
 
         pocket_data_path = pocket_path
 
+        # load datasets once outside the fold loop to avoid re-opening the same lmdb environment
+        pocket_dataset = self.load_pockets_dataset(pocket_data_path)
+        pocket_data = torch.utils.data.DataLoader(pocket_dataset, batch_size=16, collate_fn=pocket_dataset.collater)
+
+        if not use_cache:
+            mol_dataset = self.load_mols_dataset(mol_data_path, "atoms", "coordinates")
+            bsz = 64
+            mol_data_loader = torch.utils.data.DataLoader(mol_dataset, batch_size=bsz, collate_fn=mol_dataset.collater)
 
         for fold, ckpt in enumerate(ckpts):
             state = checkpoint_utils.load_checkpoint_to_cpu(ckpt)
             model.load_state_dict(state["model"], strict=False)
 
             # generate mol data
-
-            mol_cache_path=caches[fold]
+            mol_cache_path = caches[fold]
             if use_cache:
                 with open(mol_cache_path, "rb") as f:
                     mol_reps, mol_names = pickle.load(f)
-            else:            
-
-                
-                mol_dataset = self.load_mols_dataset(mol_data_path, "atoms", "coordinates")
-                num_data = len(mol_dataset)
-                bsz=64
+            else:
                 mol_reps = []
                 mol_names = []
-                labels = []
                 mol_ids_subsets = []
-                mol_data = torch.utils.data.DataLoader(mol_dataset, batch_size=bsz, collate_fn=mol_dataset.collater)
-                for _, sample in enumerate(tqdm(mol_data)):
+                for _, sample in enumerate(tqdm(mol_data_loader)):
                     if use_cuda:
                         sample = unicore.utils.move_to_cuda(sample)
                     dist = sample["net_input"]["mol_src_distance"]
@@ -1753,9 +1755,7 @@ class DrugCLIP(UnicoreTask):
 
             
 
-            # generate pocket data
-            pocket_dataset = self.load_pockets_dataset(pocket_data_path)
-            pocket_data = torch.utils.data.DataLoader(pocket_dataset, batch_size=16, collate_fn=pocket_dataset.collater)
+            # generate pocket data (dataset already loaded outside loop)
             pocket_reps = []
 
             for _, sample in enumerate(tqdm(pocket_data)):
