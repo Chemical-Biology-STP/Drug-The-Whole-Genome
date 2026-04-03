@@ -1,18 +1,23 @@
 # syntax=docker/dockerfile:1.4
 
 FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu20.04
-
+ARG http_proxy
+ARG https_proxy
+ARG python=3.9
 # Set default RUN shell to /bin/bash
 SHELL ["/bin/bash", "-cu"]
 
 
 # Set environment variables
-ENV LANG C.UTF-8
-ENV LC_ALL C.UTF-8
+ENV LANG=C.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive \
+    PYTHON_VERSION=${python} \
+    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6"
 
-
+# 配置国内 apt 源
+RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.aliyun.com@g' /etc/apt/sources.list \
+    && sed -i 's@//.*security.ubuntu.com@//mirrors.aliyun.com@g' /etc/apt/sources.list
 # Install basic packages for compiling and building
-ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-packages --no-install-recommends \
     build-essential \
     cmake \
@@ -34,15 +39,14 @@ RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-
 
 
 # Install Miniconda & use Python 3.9
-ARG python=3.9
-ENV PYTHON_VERSION=${python}
 RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/install-conda.sh \
     && chmod +x /tmp/install-conda.sh \
     && bash /tmp/install-conda.sh -b -f -p /usr/local \
     && rm -f /tmp/install-conda.sh \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
     && conda install -y python=${PYTHON_VERSION} \
     && conda clean -y --all
-
 
 # ==================================================
 # *Tools installation (optional)
@@ -70,50 +74,6 @@ RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-
     openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
-
-# Set ZSH as default shell & Install Oh My Zsh and zsh plugin: zsh-autosuggestions
-RUN chsh -s `which zsh` \
-    && curl https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh | bash -s -- --unattended \
-    && wget https://raw.githubusercontent.com/oskarkrawczyk/honukai-iterm/master/honukai.zsh-theme -O ${ZSH:-~/.oh-my-zsh}/themes/honukai.zsh-theme --no-check-certificate \
-    && sed -i.bak '/ZSH_THEME/s/\".*\"/\"honukai\"/' ~/.zshrc \
-    && git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH:-~/.oh-my-zsh}/custom/plugins/zsh-autosuggestions\
-    && sed -i.bak '/plugin/s/(.*)/(git zsh-autosuggestions)/' ~/.zshrc
-
-# make the color of zsh-autosuggestions right
-ENV TERM xterm-256color
-
-
-# Install docker (to make docker in docker work)
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
-    && echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-    $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin \
-    && rm -rf /var/lib/apt/lists/*
-
-
-# Install Tmux
-RUN apt-get update && apt-get install -y libevent-dev ncurses-dev automake pkg-config \
-    && cd /tmp \
-    && wget -O tmux-2.8.tar.gz https://github.com/tmux/tmux/archive/2.8.tar.gz \
-    && tar zxvf tmux-2.8.tar.gz \
-    && cd tmux-2.8 \
-    && ./autogen.sh \
-    && ./configure --prefix=/usr/local \
-    && make \
-    && make install \
-    && rm -rf /tmp/tmux-2.8 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Tmux configuration
-RUN git clone https://github.com/hughplay/tmux-config.git /tmp/tmux-config \
-    && bash /tmp/tmux-config/install.sh \
-    && rm -rf /tmp/tmux-config \
-    && echo "set -g default-shell `which zsh`" >> ~/.tmux.conf
-
-
 # Install lightvim, a configuration for vim
 # RUN wget https://raw.githubusercontent.com/hughplay/lightvim/master/install.sh -O - | sh
 
@@ -126,7 +86,6 @@ RUN git clone https://github.com/hughplay/tmux-config.git /tmp/tmux-config \
 # Answer: "Arial or Helvetica, always."
 # https://pubs.acs.org/doi/10.1021/acs.chemmater.6b00306
 # ==================================================
-
 
 RUN cd /tmp \
     && wget https://github.com/hughplay/memo/raw/master/code/snippet/drawing/plot_fonts.tar.gz \
@@ -169,18 +128,17 @@ EOT
 # you can find other versions and installation commands from:
 # https://pytorch.org/get-started/previous-versions/
 # https://github.com/pytorch/pytorch/wiki/PyTorch-Versions
-RUN conda install -y \
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main \
+    && conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r \
+    && conda install -y \
     pytorch==2.1.2 \
     torchvision==0.16.2 \
     torchaudio==2.1.2 \
-    pytorch-cuda=12.1 \
+    pytorch-cuda==12.1 \
     faiss-gpu=1.8.0 \
-    -c pytorch -c nvidia \
-    && conda clean -y --all
-
+    -c pytorch -c nvidia -c conda-forge \
+    && conda clean -afy
 # Install Uni-core
-ENV TORCH_CUDA_ARCH_LIST "7.0;7.5;8.0;8.6"
-
 RUN pip install --no-cache-dir \
     iopath \
     lmdb \
