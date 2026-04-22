@@ -7,16 +7,20 @@ from unicore.data import BaseWrapperDataset
 
 
 class KeyDataset(BaseWrapperDataset):
-    def __init__(self, dataset, key):
+    def __init__(self, dataset, key, default=None):
         self.dataset = dataset
         self.key = key
+        self.default = default
 
     def __len__(self):
         return len(self.dataset)
 
     @lru_cache(maxsize=16)
     def __getitem__(self, idx):
-        return self.dataset[idx][self.key]
+        item = self.dataset[idx]
+        if self.default is not None and self.key not in item:
+            return self.default
+        return item[self.key]
 
 class LengthDataset(BaseWrapperDataset):
 
