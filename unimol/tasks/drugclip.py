@@ -1707,9 +1707,7 @@ class DrugCLIP(UnicoreTask):
         # load datasets once outside the fold loop to avoid re-opening the same lmdb environment
         pocket_dataset = self.load_pockets_dataset(pocket_data_path)
         pocket_data = torch.utils.data.DataLoader(pocket_dataset, batch_size=16, collate_fn=pocket_dataset.collater)
-        print(666, use_cache)
         if not use_cache:
-            print("没有用cache")
             mol_dataset = self.load_mols_dataset(mol_data_path, "atoms", "coordinates")
             bsz = 64
             mol_data_loader = torch.utils.data.DataLoader(mol_dataset, batch_size=bsz, collate_fn=mol_dataset.collater)
