@@ -1,0 +1,195 @@
+# EasyBuild recipe for DrugCLIP
+# Virtual screening of compound libraries against protein targets
+#
+# Uses pixi to manage the Python/CUDA environment inside the module.
+# No EasyBuild toolchain dependencies needed — pixi handles everything.
+#
+# Usage after loading:
+#   drugclip-screen receptor.pdb library.sdf --residue JHN
+#   drugclip-screen-large receptor.pdb library.smi --residue JHN --chunk-size 2000000
+#
+# IMPORTANT: Model weights must be downloaded separately from HuggingFace.
+# After install, run: drugclip-download-weights
+#
+# Build requires:
+#   - pixi at /camp/home/yipy/.pixi/bin/pixi
+#   - Internet access (for conda/pip downloads)
+#   - Run on a GPU node (Uni-Core needs CUDA at build time)
+
+easyblock = 'Tarball'
+
+name = 'DrugCLIP'
+version = '1.0'
+
+homepage = 'https://github.com/THU-ATOM/Drug-The-Whole-Genome'
+description = """DrugCLIP is a contrastive learning framework for virtual screening
+ that encodes both molecules and protein binding pockets into a shared embedding
+ space. It supports screening compound libraries from SDF or SMILES files against
+ protein targets defined by PDB structures. Includes single-job screening for
+ libraries up to ~1M compounds and a large-scale parallel pipeline for
+ billion-scale libraries."""
+
+# SYSTEM toolchain — pixi manages all dependencies internally
+toolchain = SYSTEM
+
+# Source: local tarball created from the repo (no prefix directory).
+# To regenerate: git archive --format=tar.gz -o drugclip-1.0.tar.gz HEAD
+sources = ['%(namelower)s-%(version)s.tar.gz']
+source_urls = ['file:///nemo/stp/chemicalbiology/home/shared/eb']
+
+checksums = []
+
+postinstallcmds = [
+    # Install all dependencies using pixi
+    "export PATH=/camp/home/yipy/.pixi/bin:$PATH",
+    "cd %(installdir)s && pixi install",
+    "cd %(installdir)s && pixi run install-unicore",
+
+    # Create wrapper scripts in bin/
+    "mkdir -p %(installdir)s/bin",
+
+    # drugclip-screen: single-job screening
+    r"""cat > %(installdir)s/bin/drugclip-screen << 'WRAPPER'
+#!/bin/bash
+set -euo pipefail
+DRUGCLIP_ROOT="${EBROOTDRUGCLIP}"
+cd "$DRUGCLIP_ROOT"
+exec .pixi/envs/default/bin/python -c "
+import subprocess, sys
+subprocess.run(['bash', 'screen_pipeline.sh'] + sys.argv[1:], check=True)
+" "$@"
+WRAPPER
+chmod +x %(installdir)s/bin/drugclip-screen""",
+
+    # Actually, simpler: use pixi run to ensure the right env
+    r"""cat > %(installdir)s/bin/drugclip-screen << 'WRAPPER'
+#!/bin/bash
+# DrugCLIP single-job screening
+# Usage: drugclip-screen receptor.pdb library.sdf --residue JHN
+set -euo pipefail
+export DRUGCLIP_ROOT="${EBROOTDRUGCLIP}"
+cd "$DRUGCLIP_ROOT"
+export PATH="$DRUGCLIP_ROOT/.pixi/envs/default/bin:$PATH"
+exec bash screen_pipeline.sh "$@"
+WRAPPER
+chmod +x %(installdir)s/bin/drugclip-screen""",
+
+    # drugclip-screen-large: large-scale parallel screening
+    r"""cat > %(installdir)s/bin/drugclip-screen-large << 'WRAPPER'
+#!/bin/bash
+# DrugCLIP large-scale screening
+# Usage: drugclip-screen-large receptor.pdb library.smi --residue JHN
+set -euo pipefail
+export DRUGCLIP_ROOT="${EBROOTDRUGCLIP}"
+cd "$DRUGCLIP_ROOT"
+export PATH="$DRUGCLIP_ROOT/.pixi/envs/default/bin:$PATH"
+exec bash submit_large_screening.sh "$@"
+WRAPPER
+chmod +x %(installdir)s/bin/drugclip-screen-large""",
+
+    # drugclip-prepare-pocket: manual pocket extraction
+    r"""cat > %(installdir)s/bin/drugclip-prepare-pocket << 'WRAPPER'
+#!/bin/bash
+set -euo pipefail
+export DRUGCLIP_ROOT="${EBROOTDRUGCLIP}"
+exec "$DRUGCLIP_ROOT/.pixi/envs/default/bin/python" "$DRUGCLIP_ROOT/utils/pdb_to_pocket_lmdb.py" "$@"
+WRAPPER
+chmod +x %(installdir)s/bin/drugclip-prepare-pocket""",
+
+    # drugclip-prepare-library: manual library conversion
+    r"""cat > %(installdir)s/bin/drugclip-prepare-library << 'WRAPPER'
+#!/bin/bash
+set -euo pipefail
+export DRUGCLIP_ROOT="${EBROOTDRUGCLIP}"
+exec "$DRUGCLIP_ROOT/.pixi/envs/default/bin/python" "$DRUGCLIP_ROOT/utils/sdf_to_mol_lmdb.py" "$@"
+WRAPPER
+chmod +x %(installdir)s/bin/drugclip-prepare-library""",
+
+    # drugclip-download-weights: download model weights from HuggingFace
+    r"""cat > %(installdir)s/bin/drugclip-download-weights << 'WRAPPER'
+#!/bin/bash
+set -euo pipefail
+DATA_DIR="${EBROOTDRUGCLIP}/data"
+
+echo "Downloading DrugCLIP model weights and data..."
+echo "Target: $DATA_DIR"
+
+if command -v huggingface-cli &>/dev/null; then
+    huggingface-cli download bgao95/DrugCLIP_data --local-dir "$DATA_DIR"
+else
+    echo "huggingface-cli not found. Please download manually from:"
+    echo "  https://huggingface.co/datasets/bgao95/DrugCLIP_data"
+    echo ""
+    echo "Download model_weights.zip, encoded_mol_embs.zip, and targets.zip,"
+    echo "unzip them, and place them in: $DATA_DIR"
+    exit 1
+fi
+
+for f in model_weights encoded_mol_embs targets; do
+    if [ -f "$DATA_DIR/${f}.zip" ] && [ ! -d "$DATA_DIR/$f" ]; then
+        echo "Unzipping ${f}.zip..."
+        unzip -q "$DATA_DIR/${f}.zip" -d "$DATA_DIR/"
+    fi
+done
+
+echo "Done. Model weights installed at: $DATA_DIR/model_weights/"
+WRAPPER
+chmod +x %(installdir)s/bin/drugclip-download-weights""",
+
+    # Create data directories
+    "mkdir -p %(installdir)s/data/libraries",
+    "mkdir -p %(installdir)s/data/targets",
+    "mkdir -p %(installdir)s/data/encoded_mol_embs",
+]
+
+sanity_check_paths = {
+    'files': [
+        'bin/drugclip-screen',
+        'bin/drugclip-screen-large',
+        'bin/drugclip-prepare-pocket',
+        'bin/drugclip-prepare-library',
+        'unimol/__init__.py',
+        'utils/pdb_to_pocket_lmdb.py',
+        'utils/sdf_to_mol_lmdb.py',
+        'screen_pipeline.sh',
+        '.pixi/envs/default/bin/python',
+    ],
+    'dirs': [
+        'unimol',
+        'utils',
+        'dict',
+        'data',
+        '.pixi',
+    ],
+}
+
+# Skip sanity check commands — pixi env won't be on PATH during EB's check
+sanity_check_commands = []
+
+modextravars = {
+    'DRUGCLIP_ROOT': '%(installdir)s',
+    'TORCH_CUDA_ARCH_LIST': '8.0',
+}
+
+modloadmsg = """
+DrugCLIP virtual screening loaded.
+
+Commands:
+  drugclip-screen           Screen a library against a target (single SLURM job)
+  drugclip-screen-large     Screen a large library (parallel SLURM jobs)
+  drugclip-prepare-pocket   Convert a PDB to pocket LMDB
+  drugclip-prepare-library  Convert an SDF/SMI to molecule LMDB
+  drugclip-download-weights Download model weights from HuggingFace
+
+Quick start:
+  sbatch --partition=ga100 --gres=gpu:1 --mem=64G --time=04:00:00 \\
+      --wrap="drugclip-screen receptor.pdb library.sdf --residue LIG"
+
+For large libraries (>1M compounds), run from a login node:
+  drugclip-screen-large receptor.pdb library.smi --residue LIG
+
+NOTE: Model weights must be downloaded after first install:
+  drugclip-download-weights
+"""
+
+moduleclass = 'bio'

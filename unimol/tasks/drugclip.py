@@ -1680,7 +1680,7 @@ class DrugCLIP(UnicoreTask):
 
 
 
-    def retrieval_multi_folds(self, model, pocket_path, save_path, mol_data_path, fold_version, use_cache=True, use_cuda=True, cache_dir="", **kwargs):
+    def retrieval_multi_folds(self, model, pocket_path, save_path, mol_data_path, fold_version, use_cache=True, use_cuda=True, cache_dir="", top_fraction=0.02, **kwargs):
         
 
         if fold_version=="6_folds":
@@ -1843,9 +1843,9 @@ class DrugCLIP(UnicoreTask):
             lis.append((score, ret_names[i]))
         lis.sort(key=lambda x:x[0], reverse=True)
 
-        # get top 1%
-
-        lis = lis[:int(len(lis) * 0.02)]
+        # get top hits
+        if top_fraction < 1.0:
+            lis = lis[:max(1, int(len(lis) * top_fraction))]
 
         
         res_path = save_path

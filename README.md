@@ -4,6 +4,23 @@ Virtual screening of compound libraries against protein targets using DrugCLIP.
 
 ## Quick start
 
+There are two ways to use DrugCLIP: as an HPC module or from a local clone.
+
+### Option A: HPC module (recommended)
+
+```bash
+module load DrugCLIP/1.0
+
+# First time only: download model weights
+drugclip-download-weights
+
+# Screen a compound library against a protein target
+sbatch --partition=ga100 --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:00 \
+    --wrap="drugclip-screen receptor.pdb library.sdf --residue LIG"
+```
+
+### Option B: Local clone with pixi
+
 ```bash
 # 1. Install the environment (one-time)
 pixi install
@@ -124,6 +141,134 @@ bash submit_large_screening.sh receptor.pdb enamine_real_15B.smi \
 # Screen a 50M compound SDF with default settings
 bash submit_large_screening.sh receptor.pdb chembl_50M.sdf \
     --ligand cocrystal.sdf
+```
+
+## Using the HPC module
+
+If DrugCLIP is installed as an HPC module, you don't need pixi or a local clone.
+Everything is available via `module load`.
+
+### Setup (one-time)
+
+```bash
+module load DrugCLIP/1.0
+drugclip-download-weights
+```
+
+### Available commands
+
+After `module load DrugCLIP/1.0`, the following commands are on your PATH:
+
+| Command | Description |
+|---------|-------------|
+| `drugclip-screen` | Screen a library against a target (single job) |
+| `drugclip-screen-large` | Screen a large library (parallel jobs) |
+| `drugclip-prepare-pocket` | Convert a PDB to pocket LMDB |
+| `drugclip-prepare-library` | Convert an SDF/SMI to molecule LMDB |
+| `drugclip-download-weights` | Download model weights from HuggingFace |
+
+### Running a screen via sbatch --wrap
+
+For quick, one-off screens you can use `sbatch --wrap`:
+
+```bash
+module load DrugCLIP/1.0
+
+sbatch --partition=ga100 --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:00 \
+    --output=drugclip_%j.log \
+    --wrap="drugclip-screen receptor.pdb library.sdf --residue JHN"
+```
+
+### Writing a dedicated SLURM script
+
+For reproducibility or repeated use, create a SLURM script:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=drugclip_screen
+#SBATCH --partition=ga100
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
+#SBATCH --output=drugclip_%j.log
+
+module load DrugCLIP/1.0
+
+# Screen using a HETATM residue to define the binding site
+drugclip-screen examples/6QTP.pdb compounds.sdf --residue JHN
+```
+
+Save this as `my_screen.sh` and submit:
+
+```bash
+sbatch my_screen.sh
+```
+
+### More SLURM script examples
+
+Screen using a co-crystallized ligand:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=drugclip_CDK2
+#SBATCH --partition=ga100
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
+#SBATCH --output=drugclip_%j.log
+
+module load DrugCLIP/1.0
+
+drugclip-screen CDK2.pdb enamine_10k.sdf --ligand cocrystal_ligand.sdf --cutoff 12.0
+```
+
+Screen using protein residue numbers:
+
+```bash
+#!/bin/bash
+#SBATCH --job-name=drugclip_EGFR
+#SBATCH --partition=ga100
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
+#SBATCH --output=drugclip_%j.log
+
+module load DrugCLIP/1.0
+
+drugclip-screen EGFR.pdb library.smi \
+    --binding-residues 718 719 720 721 790 791 792 793 854 855 \
+    --chain A \
+    --name EGFR_kinase
+```
+
+### Large-scale screening via module
+
+For libraries over ~1M compounds, run `drugclip-screen-large` from a login node
+(it submits SLURM jobs internally):
+
+```bash
+module load DrugCLIP/1.0
+
+drugclip-screen-large receptor.pdb enamine_real_15B.smi \
+    --residue JHN \
+    --chunk-size 2000000 \
+    --max-parallel 100
+```
+
+### Manual data preparation via module
+
+```bash
+module load DrugCLIP/1.0
+
+# Convert a PDB to pocket LMDB
+drugclip-prepare-pocket --pdb receptor.pdb --output pocket.lmdb --ligand ligand.sdf
+
+# Convert an SDF or SMILES file to molecule LMDB
+drugclip-prepare-library --input compounds.sdf --output compounds.lmdb
+drugclip-prepare-library --input compounds.smi --output compounds.lmdb
 ```
 
 ## Output

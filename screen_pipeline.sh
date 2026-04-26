@@ -28,6 +28,7 @@ usage() {
     echo "  --chain <id>           Chain ID for --binding-residues (default: all)"
     echo "  --name <string>        Target name (default: from PDB filename)"
     echo "  --jobs-dir <path>      Top-level jobs directory (default: jobs/)"
+    echo "  --top-fraction <float> Fraction of library to return (default: 0.02 = top 2%)"
     exit 1
 }
 
@@ -47,6 +48,7 @@ CHAIN=""
 CUTOFF="10.0"
 TARGET_NAME=""
 JOBS_DIR="jobs"
+TOP_FRACTION="0.02"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -73,6 +75,8 @@ while [ $# -gt 0 ]; do
             TARGET_NAME="$2"; shift 2 ;;
         --jobs-dir)
             JOBS_DIR="$2"; shift 2 ;;
+        --top-fraction)
+            TOP_FRACTION="$2"; shift 2 ;;
         *)
             echo "Unknown option: $1"; usage ;;
     esac
@@ -195,7 +199,8 @@ python ./unimol/retrieval.py --user-dir ./unimol $data_path "./dict" --valid-sub
        --pocket-path "$POCKET_LMDB" \
        --fold-version 6_folds \
        --use-cache False \
-       --save-path "$SAVE_PATH"
+       --save-path "$SAVE_PATH" \
+       --top-fraction "$TOP_FRACTION"
 
 echo ""
 echo "============================================"
