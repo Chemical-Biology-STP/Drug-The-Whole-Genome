@@ -381,6 +381,55 @@ data/
 - Virtual screening post-processing: https://github.com/THU-ATOM/DrugCLIP_screen_pipeline
 - Pocket detection: https://github.com/THU-ATOM/Pocket-Detection-of-DTWG
 
+## Rebuilding the HPC module
+
+When you make code changes and want to update the installed module, there are
+two approaches.
+
+### Quick patch (immediate, no rebuild)
+
+Copy changed files directly into the installed module:
+
+```bash
+INSTALL_DIR=/nemo/stp/chemicalbiology/home/shared/easybuild/software/DrugCLIP/1.0
+
+cp utils/pdb_to_pocket_lmdb.py  $INSTALL_DIR/utils/
+cp unimol/retrieval.py           $INSTALL_DIR/unimol/
+cp unimol/tasks/drugclip.py      $INSTALL_DIR/unimol/tasks/
+cp screen_pipeline.sh            $INSTALL_DIR/
+```
+
+Takes effect immediately. Won't survive a full rebuild.
+
+### Full rebuild
+
+Run this from the repo root on a GPU node (Uni-Core needs CUDA at build time):
+
+```bash
+# 1. Commit your changes
+git add -A
+git commit -m "describe your changes"
+
+# 2. Regenerate the source tarball
+git archive --format=tar.gz -o /nemo/stp/chemicalbiology/home/shared/eb/drugclip-1.0.tar.gz HEAD
+
+# 3. Replace the EasyBuild source cache
+cp /nemo/stp/chemicalbiology/home/shared/eb/drugclip-1.0.tar.gz \
+   /nemo/stp/chemicalbiology/home/shared/easybuild/sources/d/DrugCLIP/drugclip-1.0.tar.gz
+
+# 4. Remove the old install
+rm -rf /nemo/stp/chemicalbiology/home/shared/easybuild/software/DrugCLIP
+
+# 5. Rebuild
+eb DrugCLIP-1.0-foss-2023a-CUDA-12.1.1.eb \
+    --installpath=/nemo/stp/chemicalbiology/home/shared/easybuild \
+    --robot --force
+```
+
+The rebuild takes a few minutes (pixi resolves dependencies and Uni-Core
+compiles CUDA extensions). The EasyBuild recipe is at
+`DrugCLIP-1.0-foss-2023a-CUDA-12.1.1.eb` in the repo root.
+
 ## License
 
 - **Source code**: [Apache 2.0](LICENSE) — free for academic and commercial use
