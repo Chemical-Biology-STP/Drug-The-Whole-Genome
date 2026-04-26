@@ -83,6 +83,7 @@ sbatch submit_screening.sh <receptor.pdb> <library.sdf|smi> [binding site option
 | `--chain <id>` | all | Chain ID filter (used with `--binding-residues`) |
 | `--name <string>` | from PDB filename | Target name for output files |
 | `--jobs-dir <path>` | `jobs/` | Directory for job output |
+| `--top-fraction <float>` | 0.02 | Fraction of library to return as hits (0.02 = top 2%, 1.0 = all) |
 
 #### Examples
 
@@ -101,6 +102,12 @@ sbatch submit_screening.sh receptor.pdb compounds.sdf --binding-residues 45 67 8
 
 # Same, but restricted to chain A
 sbatch submit_screening.sh receptor.pdb compounds.sdf --binding-residues 45 67 89 --chain A
+
+# Return top 5% instead of the default 2%
+sbatch submit_screening.sh receptor.pdb compounds.sdf --residue JHN --top-fraction 0.05
+
+# Return all compounds with scores
+sbatch submit_screening.sh receptor.pdb compounds.sdf --residue JHN --top-fraction 1.0
 ```
 
 ### Large libraries (over ~1M compounds)
