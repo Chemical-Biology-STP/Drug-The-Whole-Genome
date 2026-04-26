@@ -589,7 +589,7 @@ class DrugCLIP(UnicoreTask):
             False,
         )
         
-        smi_dataset = KeyDataset(dataset, "name")
+        smi_dataset = KeyDataset(dataset, "smi")
 
         def PrependAndAppend(dataset, pre_token, app_token):
             dataset = PrependTokenDataset(dataset, pre_token)
@@ -1680,24 +1680,57 @@ class DrugCLIP(UnicoreTask):
 
 
 
-    def retrieval_multi_folds(self, model, pocket_path, save_path, mol_data_path, fold_version, use_cache=True, use_cuda=True, **kwargs):
+    def retrieval_multi_folds(self, model, pocket_path, save_path, mol_data_path, fold_version, use_cache=True, use_cuda=True, cache_dir="", **kwargs):
         
 
         if fold_version=="6_folds":
             # 6 folds
             ckpts = [f"./data/model_weights/6_folds/fold_{i}.pt" for i in range(6)]
-
-            caches = [f"./data/encoded_mol_embs/6_folds/fold{i}.pkl" for i in range(6)]
+            n_folds = 6
         
         elif fold_version=="8_folds":
-
             ckpts = [f"./data/model_weights/8_folds/fold_{i}.pt" for i in range(8)]
+            n_folds = 8
 
-            caches = [f"./data/encoded_mol_embs/8_folds/fold{i}.pkl" for i in range(8)]
         elif fold_version=="6_folds_filtered":
             ckpts = [f"./data/model_weights/6_folds/fold_{i}.pt" for i in range(6)]
+            n_folds = 6
 
-            caches = [f"./data/encoded_mol_embs/6_folds_filtered/fold{i}.pkl" for i in range(6)]
+        # Determine cache directory
+        if cache_dir:
+            cache_base = cache_dir
+        else:
+            # Try to read a content hash from the LMDB for content-based caching.
+            # If the LMDB was created with sdf_to_mol_lmdb.py, it contains a
+            # __content_hash__ key. Two LMDBs with identical molecules will share
+            # the same cache regardless of filename.
+            content_hash = None
+            try:
+                import lmdb as _lmdb
+                _env = _lmdb.open(mol_data_path, subdir=False, readonly=True, lock=False)
+                with _env.begin() as _txn:
+                    raw = _txn.get(b"__content_hash__")
+                    if raw is not None:
+                        content_hash = raw.decode("ascii")[:16]  # first 16 hex chars is plenty
+                _env.close()
+            except Exception:
+                pass
+
+            if content_hash:
+                cache_base = os.path.join("./data/encoded_mol_embs", content_hash, fold_version)
+            else:
+                # Fallback: derive from LMDB filename
+                lmdb_stem = os.path.splitext(os.path.basename(mol_data_path))[0]
+                cache_base = os.path.join("./data/encoded_mol_embs", lmdb_stem, fold_version)
+        os.makedirs(cache_base, exist_ok=True)
+        caches = [os.path.join(cache_base, f"fold{i}.pkl") for i in range(n_folds)]
+
+        # Auto-detect: if all cache files exist, use them; otherwise encode from scratch
+        all_cached = all(os.path.exists(c) for c in caches)
+        if all_cached:
+            logger.info(f"Found cached molecule embeddings in {cache_base}, loading from cache")
+        else:
+            logger.info(f"No complete cache found in {cache_base}, encoding molecules from LMDB")
 
 
         res_list = []
@@ -1707,8 +1740,9 @@ class DrugCLIP(UnicoreTask):
         # load datasets once outside the fold loop to avoid re-opening the same lmdb environment
         pocket_dataset = self.load_pockets_dataset(pocket_data_path)
         pocket_data = torch.utils.data.DataLoader(pocket_dataset, batch_size=16, collate_fn=pocket_dataset.collater)
-        if not use_cache:
-            mol_dataset = self.load_mols_dataset(mol_data_path, "atoms", "coordinates")
+
+        if not all_cached:
+            mol_dataset = self.load_retrieval_mols_dataset(mol_data_path, "atoms", "coordinates")
             bsz = 64
             mol_data_loader = torch.utils.data.DataLoader(mol_dataset, batch_size=bsz, collate_fn=mol_dataset.collater)
 
@@ -1718,13 +1752,12 @@ class DrugCLIP(UnicoreTask):
 
             # generate mol data
             mol_cache_path = caches[fold]
-            if use_cache:
+            if all_cached:
                 with open(mol_cache_path, "rb") as f:
                     mol_reps, mol_names = pickle.load(f)
             else:
                 mol_reps = []
                 mol_names = []
-                mol_ids_subsets = []
                 for _, sample in enumerate(tqdm(mol_data_loader)):
                     if use_cuda:
                         sample = unicore.utils.move_to_cuda(sample)
@@ -1750,7 +1783,7 @@ class DrugCLIP(UnicoreTask):
                     mol_names.extend(sample["smi_name"])
                 mol_reps = np.concatenate(mol_reps, axis=0)
                 with open(mol_cache_path, "wb") as f:
-                    pickle.dump([mol_reps, mol_ids_subsets], f)
+                    pickle.dump([mol_reps, mol_names], f)
 
             
 

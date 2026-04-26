@@ -1,101 +1,244 @@
 # DrugCLIP for Drug-The-Whole-Genome
 
-## License
+Virtual screening of compound libraries against protein targets using DrugCLIP.
 
-This project uses different licenses for different components:
+## Quick start
 
-- **Source Code**: Licensed under [Apache 2.0](LICENSE)
-  - The source code is freely available for both academic and commercial use.
+```bash
+# 1. Install the environment (one-time)
+pixi install
+pixi run install-unicore
 
-- **Database**: Licensed under [CC BY 4.0](docs/LICENSE.md)
-  - The Drug-The-Whole-Genome database is freely available for both academic and commercial use with attribution.
-
-- **Model Weights & Outputs**: Licensed under [CC BY-NC 4.0](docs/MODEL_WEIGHTS_LICENSE.md)
-  - The DrugCLIP model weights and all results generated using the model are available for non-commercial use only.
-  - For commercial use, please contact the authors for licensing options.
-
-- **MIT Licensed Components**: [MIT License](unimol/LICENSE)
-  - Part of the code is modified from Uni-Mol.
-  - Copyright (c) 2022 DP Technology
-
-Please see [LICENSE.md](docs/LICENSE.md) and [MODEL_WEIGHTS_LICENSE.md](docs/MODEL_WEIGHTS_LICENSE.md) for full details.
-
-## Model weights and encoded embeddings
-
-link: https://huggingface.co/datasets/bgao95/DrugCLIP_data
-
-download model_weights.zip, encoded_mol_embs.zip, targets.zip, unzip them and put them inside ./data dir
-
-
-## Set environment
-
-you can set the environment with the Dockerfile in docker dir, or use the requirements.txt file.
-
-
-## Do virtual screening 
-
-```
-bash retrieval.sh
+# 2. Screen a compound library against a protein target
+sbatch submit_screening.sh receptor.pdb library.sdf --residue LIG
 ```
 
-You need to set pocket path to ./data/targets/{target}/pocket.lmdb
+## Setup
 
-target is one of the name in ./data/targets
+### Prerequisites
 
-you need to set num_folds to 8 for 5HT2A 
+- Linux with SLURM scheduler and GPU nodes
+- [Pixi](https://pixi.sh) package manager
 
-The molecule library for the virtual screening is 1648137 molecules inside ChemDIV.
+### Install
 
-each line in result file look like this:
+```bash
+# Install all dependencies
+pixi install
 
-
-```
-smiles,score
-```
-
-### For data won't fit in mem
-
-To perform screening on chucked mol embedding files, run:
-
-```shell
-python utils/screening_chucks.py --gpu_num 8 --mol_embs <path_to_multiple_chucks> --zscore_embs <uniform_small_set_for_approx_zscore> --pocket_reps <path_to_pocket_reps_pkl> --batch_size <batch_size> --output_dir <path_to_output_dir> --rm_intermediate
+# Install Uni-Core (requires torch, built separately)
+pixi run install-unicore
 ```
 
-The `--mol_embs` argument allows multiple args. Each arg should be a path to a chunk of molecule embeddings. The `--zscore_embs` argument should be a path to a small set of molecule embeddings for approximating the zscore; if not specified, the first `mol_embs` file is used. The resulting files will be saved as `merge{mol_embs_file_id}_{gpu_id}.pkl` in `output_dir` . The `--rm_intermediate` flag will remove the intermediate files after the next chunk for saving disk space.
+### Download model weights
 
-To retrieve SMILES strings and original ids for the output files, run:
+Download `model_weights.zip`, `encoded_mol_embs.zip`, and `targets.zip` from
+[HuggingFace](https://huggingface.co/datasets/bgao95/DrugCLIP_data), unzip
+them, and place them inside `./data/`.
 
-```shell
-python utils/retrieve_chunk.py --input_files output/merge*.pkl --mol_lmdb <path_to_mol_lmdb> --output_dir retrieval_results --num_threads <num_threads>
+## Usage
+
+There are two scripts for running virtual screening. Pick based on your library size.
+
+### Small to medium libraries (up to ~1M compounds)
+
+Use `submit_screening.sh`. It runs pocket extraction, library conversion, and
+screening in a single SLURM job.
+
+```bash
+sbatch submit_screening.sh <receptor.pdb> <library.sdf|smi> [binding site options]
 ```
 
-The `--mol_lmdb` should be extractly the same order as the `--mol_embs` argument in the last step. The resulting files will be saved as `retrieval_results/{pocket_name}.csv`.
+#### Binding site options (one required)
+
+| Option | Description |
+|--------|-------------|
+| `--ligand <file>` | Co-crystallized ligand (PDB or SDF) to define the binding site |
+| `--residue <name>` | HETATM residue name in the PDB (e.g., a drug molecule) |
+| `--center <x> <y> <z>` | Explicit binding site coordinates |
+| `--binding-residues <n> [n...]` | Protein residue numbers that form the binding site |
+
+#### Additional options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--cutoff <float>` | 10.0 | Pocket extraction radius in Å |
+| `--chain <id>` | all | Chain ID filter (used with `--binding-residues`) |
+| `--name <string>` | from PDB filename | Target name for output files |
+| `--jobs-dir <path>` | `jobs/` | Directory for job output |
+
+#### Examples
+
+```bash
+# Using a co-crystallized ligand to define the binding site
+sbatch submit_screening.sh examples/6QTP.pdb compounds.sdf --ligand ligand.sdf
+
+# Using a HETATM residue name (e.g., the drug JHN in the PDB)
+sbatch submit_screening.sh examples/6QTP.pdb compounds.sdf --residue JHN
+
+# Using explicit coordinates
+sbatch submit_screening.sh receptor.pdb compounds.smi --center 25.6 7.8 19.0
+
+# Using protein residue numbers that line the binding pocket
+sbatch submit_screening.sh receptor.pdb compounds.sdf --binding-residues 45 67 89 102
+
+# Same, but restricted to chain A
+sbatch submit_screening.sh receptor.pdb compounds.sdf --binding-residues 45 67 89 --chain A
+```
+
+### Large libraries (over ~1M compounds)
+
+Use `submit_large_screening.sh`. It splits the work into parallel SLURM jobs:
+
+1. Splits the input file into chunks (local, instant)
+2. Extracts the binding pocket (local, instant)
+3. Converts each chunk to LMDB format (SLURM array, CPU)
+4. Encodes molecule embeddings per chunk (SLURM array, GPU)
+5. Scores all chunks against the pocket (single GPU)
+
+Each stage waits for the previous one to finish automatically.
+
+```bash
+bash submit_large_screening.sh <receptor.pdb> <library.sdf|smi> [binding site options]
+```
+
+Note: this script is run with `bash`, not `sbatch` — it submits SLURM jobs internally.
+
+#### Additional options for large-scale screening
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--chunk-size <int>` | 1,000,000 | Molecules per chunk |
+| `--partition <name>` | ga100 | SLURM partition |
+| `--max-parallel <int>` | 50 | Max simultaneous SLURM array tasks |
+
+#### Examples
+
+```bash
+# Screen 15 billion compounds, 2M per chunk, up to 100 jobs at a time
+bash submit_large_screening.sh receptor.pdb enamine_real_15B.smi \
+    --residue JHN \
+    --chunk-size 2000000 \
+    --max-parallel 100
+
+# Screen a 50M compound SDF with default settings
+bash submit_large_screening.sh receptor.pdb chembl_50M.sdf \
+    --ligand cocrystal.sdf
+```
+
+## Output
+
+Results are written to `jobs/<target>_vs_<library>/results.txt`. Each line is:
+
+```
+SMILES,score
+```
+
+Sorted by descending score (top 2% of the library). Higher scores indicate
+stronger predicted binding.
+
+```
+jobs/
+  logs/                              SLURM log files
+  6QTP_vs_compounds/
+    results.txt                      Screening hits
+    slurm_12345.log                  Symlink to SLURM log
+```
+
+## Preparing input data
+
+### Compound libraries
+
+The pipeline accepts SDF (`.sdf`) and SMILES (`.smi`, `.smiles`, `.txt`) files
+directly. Conversion to the internal LMDB format happens automatically.
+
+- 3D conformers are generated automatically for molecules with only 2D coordinates
+- Duplicate libraries are detected by content hash and skipped
+- You can also convert manually:
+
+```bash
+pixi run python utils/sdf_to_mol_lmdb.py --input compounds.sdf --output data/libraries/compounds.lmdb
+pixi run python utils/sdf_to_mol_lmdb.py --input compounds.smi --output data/libraries/compounds.lmdb
+```
+
+### Protein targets
+
+Pocket extraction from PDB files is handled automatically by the screening
+scripts. To do it manually:
+
+```bash
+# From a co-crystallized ligand
+pixi run python utils/pdb_to_pocket_lmdb.py \
+    --pdb receptor.pdb --output data/targets/MY_TARGET/pocket.lmdb \
+    --ligand ligand.sdf --cutoff 10.0
+
+# From binding site coordinates
+pixi run python utils/pdb_to_pocket_lmdb.py \
+    --pdb receptor.pdb --output data/targets/MY_TARGET/pocket.lmdb \
+    --center 12.5 -3.2 8.0
+
+# From residue numbers
+pixi run python utils/pdb_to_pocket_lmdb.py \
+    --pdb receptor.pdb --output data/targets/MY_TARGET/pocket.lmdb \
+    --binding-residues 45 67 89 102 --chain A
+```
+
+## Caching
+
+Molecule embeddings are cached automatically so re-screening the same library
+against a different target skips the encoding step.
+
+- Cache location is derived from the LMDB content hash, so identical libraries
+  share the same cache regardless of filename
+- Cached embeddings are stored under `data/encoded_mol_embs/`
+- The first run encodes and saves; subsequent runs load from cache
 
 ## Benchmarking
 
-link: https://huggingface.co/datasets/bgao95/DrugCLIP_data
+Download `DUD-E.zip` and `LIT-PCBA.zip` from
+[HuggingFace](https://huggingface.co/datasets/bgao95/DrugCLIP_data), unzip
+them, and place them inside `./data/`.
 
-download DUD-E.zip, LIT-PCBA.zip, unzip them and put inside ./data dir
-
-
-```
+```bash
 bash test.sh
 ```
 
-select TASK to DUDE or PCBA in test.sh
+Set `TASK` to `DUDE` or `PCBA` in `test.sh`.
 
+## Project structure
+
+```
+submit_screening.sh          Single-job screening (< 1M compounds)
+submit_large_screening.sh    Multi-job screening (> 1M compounds)
+screen_pipeline.sh           Internal: called by submit_screening.sh
+retrieval.sh                 Internal: called by screen_pipeline.sh
+pixi.toml                    Environment definition
+
+utils/
+  pdb_to_pocket_lmdb.py      PDB → pocket LMDB
+  sdf_to_mol_lmdb.py         SDF/SMI → molecule LMDB
+  split_input.py              Split large files into chunks
+  screen_streaming.py         Stream-score encoded chunks
+  screening_chunk.py          Chunked GPU screening
+  retrieve_chunk.py           Retrieve SMILES from chunked results
+
+unimol/                       DrugCLIP model code
+data/
+  model_weights/              Trained model weights (6 and 8 folds)
+  encoded_mol_embs/           Cached molecule embeddings
+  targets/                    Pocket LMDB files
+  libraries/                  Compound library LMDB files
+```
 
 ## Other tools
 
-Pocket Pretraining: https://github.com/THU-ATOM/ProFSA
+- Pocket pretraining: https://github.com/THU-ATOM/ProFSA
+- Virtual screening post-processing: https://github.com/THU-ATOM/DrugCLIP_screen_pipeline
+- Pocket detection: https://github.com/THU-ATOM/Pocket-Detection-of-DTWG
 
-virtual screening post-processing: https://github.com/THU-ATOM/DrugCLIP_screen_pipeline
+## License
 
-Pocket detection: https://github.com/THU-ATOM/Pocket-Detection-of-DTWG
-
-
-
-
-
-
-
+- **Source code**: [Apache 2.0](LICENSE) — free for academic and commercial use
+- **Database**: [CC BY 4.0](docs/LICENSE.md) — free with attribution
+- **Model weights & outputs**: [CC BY-NC 4.0](docs/MODEL_WEIGHTS_LICENSE.md) — non-commercial only. Contact the authors for commercial licensing.
+- **Uni-Mol components**: [MIT](unimol/LICENSE) — modified from Uni-Mol, Copyright (c) 2022 DP Technology

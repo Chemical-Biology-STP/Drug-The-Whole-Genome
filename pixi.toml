@@ -1,0 +1,76 @@
+[workspace]
+name = "drugclip"
+description = "DrugCLIP for Drug-The-Whole-Genome virtual screening"
+channels = ["nvidia", "pytorch", "conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.9.*"
+pytorch = "==2.1.2"
+torchvision = "==0.16.2"
+torchaudio = "==2.1.2"
+pytorch-cuda = "12.1.*"
+faiss-gpu = "==1.8.0"
+rdkit = "2023.09.*"
+numpy = "*"
+scipy = "1.10.*"
+pandas = "1.5.*"
+scikit-learn = "1.2.*"
+matplotlib = "*"
+pip = "*"
+packaging = "<25.0"
+
+[pypi-dependencies]
+# NOTE: unicore must be installed manually after `pixi install` because it
+# needs torch at build time.  Run:
+#   pixi run pip install git+https://github.com/dptech-corp/Uni-Core.git --no-build-isolation
+
+# Core ML
+lightning = "==2.2.0rc0"
+torchmetrics = "*"
+einops = "*"
+
+# Hydra
+hydra-core = "==1.3.2"
+hydra-colorlog = "==1.2.0"
+hydra-optuna-sweeper = "==1.2.0"
+
+# Bio/Chem
+biotite = "==0.37.0"
+biopython = "==1.81"
+biopandas = "*"
+
+# Infra & utils
+iopath = "*"
+lmdb = "*"
+h5py = "*"
+ml-collections = "*"
+tensorboardX = "*"
+tqdm = "*"
+tokenizers = "*"
+nanopq = "*"
+transformers = "*"
+wandb = "*"
+python-dotenv = "*"
+rich = "*"
+jsonlines = "*"
+ray = "*"
+ipython = "*"
+jupyterlab = "*"
+
+# Dev/lint (optional, remove if you don't need them)
+pytest = "*"
+sh = "*"
+pre-commit = "*"
+black = "*"
+isort = "*"
+flake8 = "*"
+nbstripout = "*"
+
+[activation.env]
+TORCH_CUDA_ARCH_LIST = "8.0"
+
+[tasks]
+install-unicore = { cmd = "pip install git+https://github.com/dptech-corp/Uni-Core.git --no-build-isolation" }
+pipeline = { cmd = "bash screen_pipeline.sh" }
+screen = { cmd = "bash retrieval.sh" }
