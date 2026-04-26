@@ -28,8 +28,13 @@ import lmdb
 import numpy as np
 
 
+WATER_RESIDUES = {"HOH", "WAT", "H2O", "DOD", "TIP", "TIP3", "SPC"}
+
+
 def parse_pdb_atoms(pdb_path):
     """Parse ATOM/HETATM records from a PDB file.
+
+    Water molecules and common buffer/salt ions are excluded automatically.
 
     Returns list of dicts with keys: atom_name, element, coord, res_id
     """
@@ -38,8 +43,13 @@ def parse_pdb_atoms(pdb_path):
         for line in f:
             if not (line.startswith("ATOM") or line.startswith("HETATM")):
                 continue
-            atom_name = line[12:16].strip()
             res_name = line[17:20].strip()
+
+            # Skip water molecules
+            if res_name in WATER_RESIDUES:
+                continue
+
+            atom_name = line[12:16].strip()
             chain = line[21]
             res_seq = line[22:26].strip()
             x = float(line[30:38])
