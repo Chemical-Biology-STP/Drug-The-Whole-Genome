@@ -4,9 +4,22 @@ Virtual screening of compound libraries against protein targets using DrugCLIP.
 
 ## Quick start
 
-There are two ways to use DrugCLIP: as an HPC module or from a local clone.
+There are three ways to use DrugCLIP: via the web application, as an HPC module, or from a local clone.
 
-### Option A: HPC module (recommended)
+### Option A: Web application (easiest)
+
+A browser-based interface for submitting and monitoring screening jobs — no command-line knowledge required.
+
+```bash
+# Start the web server (from the repo root)
+pixi run python webapp/app.py
+```
+
+Then open http://localhost:5000 in your browser. You can upload PDB and library files, configure all screening parameters with guided tooltips, submit jobs to SLURM, and view results — all from the browser.
+
+See the [Web Application](#web-application) section for full details.
+
+### Option B: HPC module (recommended for CLI users)
 
 ```bash
 module load DrugCLIP/1.0
@@ -19,7 +32,7 @@ sbatch --partition=ga100 --gres=gpu:1 --cpus-per-task=8 --mem=64G --time=04:00:0
     --wrap="drugclip-screen receptor.pdb library.sdf --residue LIG"
 ```
 
-### Option B: Local clone with pixi
+### Option C: Local clone with pixi
 
 ```bash
 # 1. Install the environment (one-time)
@@ -357,6 +370,52 @@ bash test.sh
 
 Set `TASK` to `DUDE` or `PCBA` in `test.sh`.
 
+## Web Application
+
+The `webapp/` directory contains a Flask web application that wraps the screening pipeline with a browser-based UI. It is designed for researchers who prefer not to use the command line.
+
+### Starting the server
+
+```bash
+# From the repo root
+pixi run python webapp/app.py
+```
+
+The server starts on http://localhost:5000. It requires SLURM client tools (`sbatch`, `squeue`, `sacct`, `scancel`) to be available on the machine where it runs — typically a login node.
+
+### Features
+
+- **File upload** — upload receptor PDB and compound library files directly from the browser
+- **Binding site definition** — choose from four methods (co-crystallized ligand, HETATM residue name, XYZ coordinates, or residue numbers) with conditional form fields
+- **Parameter tooltips** — plain-language explanations next to every parameter
+- **Standard and large-scale modes** — toggle between single-job and parallel chunked screening
+- **Job monitoring** — background polling of SLURM status with live updates
+- **Results viewer** — paginated table of SMILES and scores with download button
+- **Log viewer** — SLURM log output with AJAX refresh
+- **Multi-tenancy** — each browser session is isolated; users only see their own jobs
+
+### Structure
+
+```
+webapp/
+  app.py                    Flask app factory and entry point
+  config.py                 Configuration (upload limits, poll interval, paths)
+  routes/                   Route handlers (dashboard, jobs, results, logs, help)
+  services/                 Service layer (SLURM client, file upload, job store,
+                            job submission, job monitor, results parser)
+  templates/                Jinja2 templates (Bootstrap 5)
+  static/                   CSS and JS assets
+  data/jobs.json            Persistent job metadata store
+```
+
+### Running tests
+
+```bash
+pixi run python -m pytest webapp/tests/ -v
+```
+
+84 tests including 10 Hypothesis property-based tests covering all correctness properties.
+
 ## Project structure
 
 ```
@@ -365,6 +424,13 @@ submit_large_screening.sh    Multi-job screening (> 1M compounds)
 screen_pipeline.sh           Internal: called by submit_screening.sh
 retrieval.sh                 Internal: called by screen_pipeline.sh
 pixi.toml                    Environment definition
+
+webapp/                       Browser-based web interface
+  app.py                      Flask entry point (pixi run python webapp/app.py)
+  routes/                     Route handlers
+  services/                   Service layer (SLURM, uploads, jobs, results)
+  templates/                  Jinja2 HTML templates
+  static/                     CSS and JS assets
 
 utils/
   pdb_to_pocket_lmdb.py      PDB → pocket LMDB
