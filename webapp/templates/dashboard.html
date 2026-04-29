@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Job Submission Form -->
+    <div class="col-lg-8 mx-auto">
+        <h2 class="mb-4"><i class="bi bi-send me-2"></i>Submit Screening Job</h2>
+
+        <form action="/jobs/submit" method="POST" enctype="multipart/form-data">
+            <!-- Receptor PDB File -->
+            <div class="mb-3">
+                <label for="pdb_file" class="form-label">
+                    Receptor PDB File
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="Upload the protein structure file in PDB format. This is the target receptor for virtual screening."></i>
+                </label>
+                <input type="file" class="form-control" id="pdb_file" name="pdb_file" accept=".pdb" />
+            </div>
+
+            <!-- Compound Library File -->
+            <div class="mb-3">
+                <label for="library_file" class="form-label">
+                    Compound Library
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="Upload the compound library to screen against the receptor. Supported formats: SDF, SMI, SMILES, or TXT."></i>
+                </label>
+                <input type="file" class="form-control" id="library_file" name="library_file" accept=".sdf,.smi,.smiles,.txt" />
+            </div>
+
+            <!-- Binding Site Method -->
+            <div class="mb-3">
+                <label class="form-label">
+                    Binding Site Method
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="Choose how to define the protein binding site. This determines where the screening focuses."></i>
+                </label>
+
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="binding_site_method" id="method_ligand" value="ligand" checked />
+                    <label class="form-check-label" for="method_ligand">Co-crystallized Ligand</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="binding_site_method" id="method_residue" value="residue" />
+                    <label class="form-check-label" for="method_residue">HETATM Residue Name</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="binding_site_method" id="method_center" value="center" />
+                    <label class="form-check-label" for="method_center">Explicit XYZ Coordinates</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="binding_site_method" id="method_binding_residues" value="binding_residues" />
+                    <label class="form-check-label" for="method_binding_residues">Protein Residue Numbers</label>
+                </div>
+
+                <!-- Ligand fields -->
+                <div id="fields-ligand" class="binding-site-fields active">
+                    <label for="ligand_file" class="form-label">Ligand File</label>
+                    <input type="file" class="form-control" id="ligand_file" name="ligand_file" accept=".pdb,.sdf" />
+                </div>
+
+                <!-- Residue fields -->
+                <div id="fields-residue" class="binding-site-fields">
+                    <label for="residue_name" class="form-label">Residue Name</label>
+                    <input type="text" class="form-control" id="residue_name" name="residue_name" placeholder="e.g., JHN" />
+                </div>
+
+                <!-- Center fields -->
+                <div id="fields-center" class="binding-site-fields">
+                    <label class="form-label">Binding Site Center Coordinates</label>
+                    <div class="row g-2">
+                        <div class="col">
+                            <input type="number" class="form-control" name="center_x" placeholder="X" step="any" />
+                        </div>
+                        <div class="col">
+                            <input type="number" class="form-control" name="center_y" placeholder="Y" step="any" />
+                        </div>
+                        <div class="col">
+                            <input type="number" class="form-control" name="center_z" placeholder="Z" step="any" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Binding residues fields -->
+                <div id="fields-binding_residues" class="binding-site-fields">
+                    <div class="mb-2">
+                        <label for="binding_residues" class="form-label">Residue Numbers</label>
+                        <input type="text" class="form-control" id="binding_residues" name="binding_residues" placeholder="e.g., 100 101 102" />
+                    </div>
+                    <div>
+                        <label for="chain_id" class="form-label">Chain ID (optional)</label>
+                        <input type="text" class="form-control" id="chain_id" name="chain_id" placeholder="e.g., A" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cutoff -->
+            <div class="mb-3">
+                <label for="cutoff" class="form-label">
+                    Cutoff (Å)
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="How far (in Ångströms) from the binding site center to look for pocket residues. A larger value captures more of the protein around the binding site. Default is 10.0 Å, which works well for most drug-sized pockets."></i>
+                </label>
+                <input type="number" class="form-control" id="cutoff" name="cutoff" value="10.0" step="any" />
+            </div>
+
+            <!-- Target Name -->
+            <div class="mb-3">
+                <label for="target_name" class="form-label">
+                    Target Name
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="A name for this screening target. Auto-filled from the PDB filename."></i>
+                </label>
+                <input type="text" class="form-control" id="target_name" name="target_name" />
+            </div>
+
+            <!-- Top Fraction -->
+            <div class="mb-3">
+                <label for="top_fraction" class="form-label">
+                    Top Fraction
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="What percentage of the screened compounds to return as hits. For example, 0.02 returns the top 2% of compounds ranked by predicted binding score. Set to 1.0 to get scores for every compound."></i>
+                </label>
+                <input type="number" class="form-control" id="top_fraction" name="top_fraction" value="0.02" step="any" />
+            </div>
+
+            <!-- Screening Mode -->
+            <div class="mb-3">
+                <label class="form-label">
+                    Screening Mode
+                    <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                       data-bs-title="Standard mode runs everything in a single job and works for libraries up to about 1 million compounds. Large-scale mode splits the library into chunks and processes them in parallel, which is needed for bigger libraries."></i>
+                </label>
+
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="screening_mode" id="mode_standard" value="standard" checked />
+                    <label class="form-check-label" for="mode_standard">Standard</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="screening_mode" id="mode_large_scale" value="large_scale" />
+                    <label class="form-check-label" for="mode_large_scale">Large-Scale</label>
+                </div>
+
+                <!-- Large-scale fields -->
+                <div class="large-scale-fields">
+                    <div class="mb-2">
+                        <label for="chunk_size" class="form-label">
+                            Chunk Size
+                            <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                               data-bs-title="Number of compounds per chunk when splitting a large library. Default is 1,000,000."></i>
+                        </label>
+                        <input type="number" class="form-control" id="chunk_size" name="chunk_size" value="1000000" />
+                    </div>
+                    <div class="mb-2">
+                        <label for="partition" class="form-label">
+                            Partition
+                            <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                               data-bs-title="The SLURM partition (queue) to submit jobs to. Default is ga100 (GPU nodes)."></i>
+                        </label>
+                        <input type="text" class="form-control" id="partition" name="partition" value="ga100" />
+                    </div>
+                    <div>
+                        <label for="max_parallel" class="form-label">
+                            Max Parallel Jobs
+                            <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
+                               data-bs-title="Maximum number of SLURM jobs to run simultaneously. Default is 50."></i>
+                        </label>
+                        <input type="number" class="form-control" id="max_parallel" name="max_parallel" value="50" />
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="d-grid">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <i class="bi bi-rocket-takeoff me-2"></i>Submit Job
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Job List -->
+<div class="row mt-5">
+    <div class="col-lg-10 mx-auto">
+        <h2 class="mb-4"><i class="bi bi-list-task me-2"></i>Your Jobs</h2>
+
+        {% if jobs %}
+        <div class="table-responsive">
+            <table class="table table-striped table-hover table-jobs">
+                <thead class="table-dark">
+                    <tr>
+                        <th>SLURM Job ID</th>
+                        <th>Target</th>
+                        <th>Library</th>
+                        <th>Mode</th>
+                        <th>Submitted</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in jobs %}
+                    <tr>
+                        <td><a href="/jobs/{{ job.job_id }}">{{ job.job_id }}</a></td>
+                        <td>{{ job.target_name }}</td>
+                        <td>{{ job.library_name }}</td>
+                        <td>{{ job.screening_mode }}</td>
+                        <td>{{ job.submitted_at }}</td>
+                        <td><span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No jobs submitted yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/form.js') }}"></script>
+{% endblock %}

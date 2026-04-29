@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block title %}Job {{ job.job_id }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('dashboard.index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Job {{ job.job_id }}</li>
+            </ol>
+        </nav>
+
+        <h2 class="mb-4">
+            Job {{ job.job_id }}
+            <span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span>
+        </h2>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Submission Parameters Summary Card -->
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-list-check me-2"></i>Submission Parameters</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        <tr>
+                            <th scope="row">Target Name</th>
+                            <td>{{ job.target_name }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Library</th>
+                            <td>{{ job.library_name }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Screening Mode</th>
+                            <td>{{ job.screening_mode|replace('_', ' ')|title }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Binding Site Method</th>
+                            <td>{{ job.params.get('binding_site_method', 'N/A')|replace('_', ' ')|title }}</td>
+                        </tr>
+                        {% if job.params.get('ligand_path') %}
+                        <tr>
+                            <th scope="row">Ligand File</th>
+                            <td>{{ job.params['ligand_path'].split('/')[-1] if job.params['ligand_path'] else 'N/A' }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if job.params.get('residue_name') %}
+                        <tr>
+                            <th scope="row">Residue Name</th>
+                            <td>{{ job.params['residue_name'] }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if job.params.get('center_x') is not none %}
+                        <tr>
+                            <th scope="row">Center Coordinates</th>
+                            <td>({{ job.params['center_x'] }}, {{ job.params['center_y'] }}, {{ job.params['center_z'] }})</td>
+                        </tr>
+                        {% endif %}
+                        {% if job.params.get('binding_residues') %}
+                        <tr>
+                            <th scope="row">Binding Residues</th>
+                            <td>{{ job.params['binding_residues'] }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if job.params.get('chain_id') %}
+                        <tr>
+                            <th scope="row">Chain ID</th>
+                            <td>{{ job.params['chain_id'] }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <th scope="row">Cutoff (Å)</th>
+                            <td>{{ job.params.get('cutoff', 10.0) }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Top Fraction</th>
+                            <td>{{ job.params.get('top_fraction', 0.02) }}</td>
+                        </tr>
+                        {% if job.screening_mode == 'large_scale' %}
+                        <tr>
+                            <th scope="row">Chunk Size</th>
+                            <td>{{ job.params.get('chunk_size', 1000000) }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Partition</th>
+                            <td>{{ job.params.get('partition', 'ga100') }}</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Max Parallel Jobs</th>
+                            <td>{{ job.params.get('max_parallel', 50) }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Log Viewer Section (shown for RUNNING, COMPLETED, FAILED jobs) -->
+        {% if job.status in ('RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT') %}
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0"><i class="bi bi-terminal me-2"></i>SLURM Log</h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh-log-btn">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh Log
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-viewer" id="log-viewer">
+                    <p class="text-muted">Click "Refresh Log" to load the latest log output.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Error Message (shown for FAILED/TIMEOUT) -->
+        {% if job.status in ('FAILED', 'TIMEOUT') and job.error_message %}
+        <div class="card mb-4 border-danger">
+            <div class="card-header bg-danger text-white">
+                <h5 class="card-title mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Error Details</h5>
+            </div>
+            <div class="card-body">
+                <pre class="mb-0 text-danger">{{ job.error_message }}</pre>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Sidebar: Status and Actions -->
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-info-circle me-2"></i>Job Status</h5>
+            </div>
+            <div class="card-body">
+                <dl>
+                    <dt>Status</dt>
+                    <dd><span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span></dd>
+                    <dt>Submitted</dt>
+                    <dd>{{ job.submitted_at }}</dd>
+                    <dt>Last Updated</dt>
+                    <dd>{{ job.updated_at }}</dd>
+                    <dt>Job Directory</dt>
+                    <dd><code>{{ job.job_dir }}</code></dd>
+                    {% if job.child_job_ids %}
+                    <dt>Child Job IDs</dt>
+                    <dd>{{ job.child_job_ids|join(', ') }}</dd>
+                    {% endif %}
+                </dl>
+            </div>
+        </div>
+
+        <!-- Actions Card -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-gear me-2"></i>Actions</h5>
+            </div>
+            <div class="card-body">
+                {% if job.status in ('PENDING', 'RUNNING') %}
+                <form method="POST" action="{{ url_for('jobs.cancel', job_id=job.job_id) }}"
+                      onsubmit="return confirm('Are you sure you want to cancel this job?');">
+                    <button type="submit" class="btn btn-danger w-100 mb-2">
+                        <i class="bi bi-x-circle me-1"></i>Cancel Job
+                    </button>
+                </form>
+                {% endif %}
+
+                {% if job.status == 'COMPLETED' %}
+                <a href="/jobs/{{ job.job_id }}/results" class="btn btn-success w-100 mb-2">
+                    <i class="bi bi-table me-1"></i>View Results
+                </a>
+                {% endif %}
+
+                <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-secondary w-100">
+                    <i class="bi bi-arrow-left me-1"></i>Back to Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+{% if job.status in ('RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT') %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var refreshBtn = document.getElementById('refresh-log-btn');
+    var logViewer = document.getElementById('log-viewer');
+
+    if (refreshBtn && logViewer) {
+        refreshBtn.addEventListener('click', function() {
+            refreshBtn.disabled = true;
+            refreshBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Loading...';
+
+            fetch('/jobs/{{ job.job_id }}/log')
+                .then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch log');
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    logViewer.textContent = data.log || 'No log content available.';
+                })
+                .catch(function(error) {
+                    logViewer.textContent = 'Error loading log: ' + error.message;
+                })
+                .finally(function() {
+                    refreshBtn.disabled = false;
+                    refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Log';
+                });
+        });
+    }
+});
+</script>
+{% endif %}
+{% endblock %}

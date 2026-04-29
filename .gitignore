@@ -4,3 +4,12 @@ data
 **/py_scripts
 *.txt
 test*
+
+# Flask session files (runtime data)
+webapp/flask_session/
+
+# Uploaded files (runtime data)
+webapp/uploads/*/
+
+# Hypothesis database
+.hypothesis/examples/

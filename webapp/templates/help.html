@@ -1,0 +1,347 @@
+{% extends "base.html" %}
+
+{% block title %}Help{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-10 mx-auto">
+        <h1 class="mb-3"><i class="bi bi-question-circle me-2"></i>Help &amp; Documentation</h1>
+        <p class="text-muted mb-4">
+            Learn how the DrugCLIP virtual screening workflow operates, how to define binding sites,
+            and which screening mode to choose for your library.
+        </p>
+
+        <div class="accordion" id="helpAccordion">
+
+            <!-- Section 1: Screening Workflow Overview -->
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="headingWorkflow">
+                    <button class="accordion-button" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseWorkflow"
+                            aria-expanded="true" aria-controls="collapseWorkflow">
+                        <i class="bi bi-diagram-3 me-2"></i>Screening Workflow Overview
+                    </button>
+                </h2>
+                <div id="collapseWorkflow" class="accordion-collapse collapse show"
+                     aria-labelledby="headingWorkflow" data-bs-parent="#helpAccordion">
+                    <div class="accordion-body">
+                        <p>
+                            DrugCLIP performs virtual screening by encoding both the protein binding pocket
+                            and candidate molecules into a shared embedding space, then ranking compounds
+                            by similarity. The pipeline runs in four sequential steps:
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="card h-100 border-primary">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <span class="badge bg-primary rounded-pill me-2">1</span>
+                                            Pocket Extraction
+                                        </h5>
+                                        <p class="card-text">
+                                            The binding pocket is extracted from your protein structure (PDB file)
+                                            using the binding site definition you provide. Residues within the
+                                            specified cutoff radius are identified and converted to LMDB format
+                                            for the model.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100 border-primary">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <span class="badge bg-primary rounded-pill me-2">2</span>
+                                            Library Conversion
+                                        </h5>
+                                        <p class="card-text">
+                                            Your compound library (SDF, SMI, or SMILES file) is converted into
+                                            LMDB format. Each molecule is parsed and stored with its 3D conformer
+                                            so the model can process it efficiently on GPU.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100 border-primary">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <span class="badge bg-primary rounded-pill me-2">3</span>
+                                            Encoding
+                                        </h5>
+                                        <p class="card-text">
+                                            Both the pocket and all molecules are encoded into fixed-length
+                                            embedding vectors using the DrugCLIP neural network. This step
+                                            runs on GPU and produces compact representations that capture
+                                            binding-relevant features.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100 border-primary">
+                                    <div class="card-body">
+                                        <h5 class="card-title">
+                                            <span class="badge bg-primary rounded-pill me-2">4</span>
+                                            Scoring
+                                        </h5>
+                                        <p class="card-text">
+                                            Similarity scores are computed between the pocket embedding and every
+                                            molecule embedding. Compounds are ranked by score, and the top fraction
+                                            (e.g., top 2%) is returned as hits in the results file.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 2: Binding Site Definition Methods -->
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="headingBindingSite">
+                    <button class="accordion-button collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseBindingSite"
+                            aria-expanded="false" aria-controls="collapseBindingSite">
+                        <i class="bi bi-bullseye me-2"></i>Binding Site Definition Methods
+                    </button>
+                </h2>
+                <div id="collapseBindingSite" class="accordion-collapse collapse"
+                     aria-labelledby="headingBindingSite" data-bs-parent="#helpAccordion">
+                    <div class="accordion-body">
+                        <p>
+                            You must define where on the protein the binding pocket is located. DrugCLIP
+                            supports four methods — choose the one that matches the structural information
+                            you have available.
+                        </p>
+
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <strong><i class="bi bi-file-earmark-medical me-1"></i>Co-crystallized Ligand</strong>
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">
+                                    Upload a file containing the coordinates of a ligand that is already bound
+                                    in the crystal structure. The pocket is defined as all protein residues within
+                                    the cutoff distance of this ligand.
+                                </p>
+                                <div class="alert alert-info mb-0" role="alert">
+                                    <i class="bi bi-lightbulb me-1"></i>
+                                    <strong>When to use:</strong> You have a PDB structure with a known ligand
+                                    bound in the active site (e.g., from a co-crystal structure in the PDB).
+                                    This is the most common and reliable method.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <strong><i class="bi bi-tag me-1"></i>HETATM Residue Name</strong>
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">
+                                    Specify the 3-letter residue name of a heteroatom (non-protein molecule)
+                                    present in the PDB file. The tool will locate that molecule and define the
+                                    pocket around it.
+                                </p>
+                                <div class="alert alert-info mb-0" role="alert">
+                                    <i class="bi bi-lightbulb me-1"></i>
+                                    <strong>When to use:</strong> You know the 3-letter code of a bound molecule
+                                    in your PDB file (e.g., "JHN", "ATP", "NAG") but don't have a separate
+                                    ligand file. Check the HETATM records in your PDB to find the code.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <strong><i class="bi bi-geo-alt me-1"></i>Explicit XYZ Coordinates</strong>
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">
+                                    Provide the X, Y, and Z coordinates (in Ångströms) of the center of the
+                                    binding site. All residues within the cutoff radius of this point will form
+                                    the pocket.
+                                </p>
+                                <div class="alert alert-info mb-0" role="alert">
+                                    <i class="bi bi-lightbulb me-1"></i>
+                                    <strong>When to use:</strong> You know the center of the binding site from
+                                    literature, a docking study, or visual inspection in a molecular viewer
+                                    (e.g., PyMOL, ChimeraX). Useful when no ligand is present in the structure.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3">
+                            <div class="card-header bg-light">
+                                <strong><i class="bi bi-list-ol me-1"></i>Protein Residue Numbers</strong>
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">
+                                    Specify the residue numbers that form the binding pocket directly. You can
+                                    optionally provide a chain ID if your protein has multiple chains.
+                                </p>
+                                <div class="alert alert-info mb-0" role="alert">
+                                    <i class="bi bi-lightbulb me-1"></i>
+                                    <strong>When to use:</strong> You know which residues form the binding pocket
+                                    from mutagenesis data, literature, or sequence analysis. This gives you the
+                                    most precise control over pocket definition.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 3: Screening Modes -->
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="headingModes">
+                    <button class="accordion-button collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseModes"
+                            aria-expanded="false" aria-controls="collapseModes">
+                        <i class="bi bi-speedometer2 me-2"></i>Screening Modes
+                    </button>
+                </h2>
+                <div id="collapseModes" class="accordion-collapse collapse"
+                     aria-labelledby="headingModes" data-bs-parent="#helpAccordion">
+                    <div class="accordion-body">
+                        <p>
+                            DrugCLIP offers two screening modes to handle libraries of different sizes
+                            efficiently on the HPC cluster.
+                        </p>
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header bg-success text-white">
+                                        <strong><i class="bi bi-play-circle me-1"></i>Standard Mode</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="card-text">
+                                            Runs the entire screening pipeline as a single SLURM job. All four
+                                            steps (pocket extraction, library conversion, encoding, scoring) execute
+                                            sequentially on one GPU node.
+                                        </p>
+                                        <h6>Best for:</h6>
+                                        <ul>
+                                            <li>Libraries up to approximately 1 million compounds</li>
+                                            <li>Quick screening runs</li>
+                                            <li>Testing and validation with smaller datasets</li>
+                                        </ul>
+                                        <h6>Configuration:</h6>
+                                        <p class="text-muted mb-0">
+                                            No additional parameters needed beyond the basic form fields.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card h-100">
+                                    <div class="card-header bg-warning text-dark">
+                                        <strong><i class="bi bi-lightning me-1"></i>Large-Scale Mode</strong>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="card-text">
+                                            Splits the compound library into chunks and processes them in parallel
+                                            across multiple GPU nodes. Results are merged at the end.
+                                        </p>
+                                        <h6>Best for:</h6>
+                                        <ul>
+                                            <li>Libraries with more than 1 million compounds</li>
+                                            <li>Large commercial libraries (e.g., Enamine REAL, ZINC)</li>
+                                            <li>When faster turnaround is needed for big datasets</li>
+                                        </ul>
+                                        <h6>Configuration:</h6>
+                                        <ul class="text-muted mb-0">
+                                            <li><strong>Chunk size</strong> — number of compounds per chunk (default: 1,000,000)</li>
+                                            <li><strong>Partition</strong> — SLURM partition to use (default: ga100)</li>
+                                            <li><strong>Max parallel jobs</strong> — maximum concurrent SLURM jobs (default: 50)</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 4: FAQ / Troubleshooting -->
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="headingFAQ">
+                    <button class="accordion-button collapsed" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#collapseFAQ"
+                            aria-expanded="false" aria-controls="collapseFAQ">
+                        <i class="bi bi-chat-dots me-2"></i>FAQ &amp; Troubleshooting
+                    </button>
+                </h2>
+                <div id="collapseFAQ" class="accordion-collapse collapse"
+                     aria-labelledby="headingFAQ" data-bs-parent="#helpAccordion">
+                    <div class="accordion-body">
+
+                        <div class="mb-4">
+                            <h5>My job has been PENDING for a long time. Is something wrong?</h5>
+                            <p>
+                                A PENDING status means your job is waiting in the SLURM queue for a GPU node
+                                to become available. During busy periods, wait times can range from minutes to
+                                hours depending on cluster load. Check the job log for any scheduler messages.
+                                If the job stays PENDING for more than a few hours, the partition may be fully
+                                occupied — try again later or contact your HPC administrator.
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5>My job FAILED. How do I find out what went wrong?</h5>
+                            <p>
+                                Go to the job detail page and check the log viewer section. The last 50 lines
+                                of the SLURM log are displayed automatically for failed jobs. Common causes
+                                include: invalid PDB format, empty compound library, insufficient GPU memory
+                                for very large pockets, or missing atoms in the structure. Fix the input and
+                                resubmit.
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5>What file formats are supported for the compound library?</h5>
+                            <p>
+                                The compound library can be uploaded in the following formats:
+                            </p>
+                            <ul>
+                                <li><strong>.sdf</strong> — Structure-Data File with 3D coordinates</li>
+                                <li><strong>.smi</strong> — SMILES file (one SMILES per line)</li>
+                                <li><strong>.smiles</strong> — Same as .smi</li>
+                                <li><strong>.txt</strong> — Plain text file with one SMILES per line</li>
+                            </ul>
+                            <p>
+                                For SMILES-based formats, 3D conformers are generated automatically during
+                                the library conversion step.
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5>How do I choose the right cutoff radius?</h5>
+                            <p>
+                                The default cutoff of 10.0 Å works well for most drug-sized binding pockets.
+                                If your target has a particularly large or shallow binding site, you may want
+                                to increase it to 12–15 Å. For very small or deeply buried pockets, 8 Å may
+                                be sufficient. When in doubt, stick with the default.
+                            </p>
+                        </div>
+
+                        <div class="mb-4">
+                            <h5>Can I screen the same protein against multiple libraries?</h5>
+                            <p>
+                                Yes. Submit a separate job for each library using the same PDB file and binding
+                                site definition. Each job runs independently and produces its own results file.
+                                You can compare hits across libraries by downloading and merging the results.
+                            </p>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- end accordion -->
+    </div>
+</div>
+{% endblock %}

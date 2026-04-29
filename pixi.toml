@@ -19,6 +19,7 @@ scikit-learn = "1.2.*"
 matplotlib = "*"
 pip = "*"
 packaging = "<25.0"
+axel = ">=2.17.13,<3"
 
 [pypi-dependencies]
 # NOTE: unicore must be installed manually after `pixi install` because it
@@ -58,7 +59,12 @@ ray = "*"
 ipython = "*"
 jupyterlab = "*"
 
+# Web app
+flask = "==3.1.1"
+flask-session = "==0.8.0"
+
 # Dev/lint (optional, remove if you don't need them)
+hypothesis = "==6.131.15"
 pytest = "*"
 sh = "*"
 pre-commit = "*"
