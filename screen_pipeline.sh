@@ -49,6 +49,8 @@ CUTOFF="10.0"
 TARGET_NAME=""
 JOBS_DIR="jobs"
 TOP_FRACTION="0.02"
+USE_CACHE="False"
+CACHE_DIR=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -77,6 +79,10 @@ while [ $# -gt 0 ]; do
             JOBS_DIR="$2"; shift 2 ;;
         --top-fraction)
             TOP_FRACTION="$2"; shift 2 ;;
+        --use-cache)
+            USE_CACHE="$2"; shift 2 ;;
+        --cache-dir)
+            CACHE_DIR="$2"; shift 2 ;;
         *)
             echo "Unknown option: $1"; usage ;;
     esac
@@ -189,7 +195,7 @@ echo "  Pocket: $POCKET_LMDB"
 echo "  Library: $MOL_LMDB"
 echo "  Output: $SAVE_PATH"
 
-python ./unimol/retrieval.py --user-dir ./unimol $data_path "./dict" --valid-subset test \
+python ./unimol/retrieval.py --user-dir ./unimol "./dict" --valid-subset test \
        --num-workers 8 --ddp-backend=c10d --batch-size 4 \
        --task drugclip --loss in_batch_softmax --arch drugclip \
        --max-pocket-atoms 511 \
@@ -198,7 +204,8 @@ python ./unimol/retrieval.py --user-dir ./unimol $data_path "./dict" --valid-sub
        --mol-path "$MOL_LMDB" \
        --pocket-path "$POCKET_LMDB" \
        --fold-version 6_folds \
-       --use-cache False \
+       --use-cache "$USE_CACHE" \
+       ${CACHE_DIR:+--cache-dir "$CACHE_DIR"} \
        --save-path "$SAVE_PATH" \
        --top-fraction "$TOP_FRACTION"
 

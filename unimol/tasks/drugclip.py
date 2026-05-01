@@ -1755,6 +1755,17 @@ class DrugCLIP(UnicoreTask):
             if all_cached:
                 with open(mol_cache_path, "rb") as f:
                     mol_reps, mol_names = pickle.load(f)
+                # Cache was built without names — load SMILES from LMDB as fallback
+                if len(mol_names) == 0:
+                    import lmdb as _lmdb
+                    _env = _lmdb.open(mol_data_path, readonly=True, lock=False, subdir=False)
+                    with _env.begin() as _txn:
+                        n = _txn.stat()["entries"]
+                        mol_names = []
+                        for _i in range(n):
+                            _entry = pickle.loads(_txn.get(str(_i).encode()))
+                            mol_names.append(_entry.get("smiles", _entry.get("smi", str(_i))))
+                    _env.close()
             else:
                 mol_reps = []
                 mol_names = []
