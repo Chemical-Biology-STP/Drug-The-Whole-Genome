@@ -89,28 +89,33 @@ class JobSubmissionService:
                 str(params.center_z),
             ])
         elif params.binding_site_method == "binding_residues":
-            args.extend(["--binding_residues", params.binding_residues])
+            args.extend(["--binding-residues", params.binding_residues])
             if params.chain_id:
-                args.extend(["--chain_id", params.chain_id])
+                args.extend(["--chain", params.chain_id])
 
         # Optional parameters
         if params.cutoff is not None:
             args.extend(["--cutoff", str(params.cutoff)])
 
         if params.target_name is not None:
-            args.extend(["--target_name", str(params.target_name)])
+            args.extend(["--name", str(params.target_name)])
 
         if params.top_fraction is not None:
-            args.extend(["--top_fraction", str(params.top_fraction)])
+            args.extend(["--top-fraction", str(params.top_fraction)])
 
         # Large-scale only parameters
         if params.screening_mode == "large_scale":
             if params.chunk_size is not None:
-                args.extend(["--chunk_size", str(params.chunk_size)])
+                args.extend(["--chunk-size", str(params.chunk_size)])
             if params.partition is not None:
                 args.extend(["--partition", str(params.partition)])
             if params.max_parallel is not None:
-                args.extend(["--max_parallel", str(params.max_parallel)])
+                args.extend(["--max-parallel", str(params.max_parallel)])
+
+        # Pre-encoded library: skip molecule encoding step
+        if params.use_preencoded_library and params.cache_dir:
+            args.extend(["--use-cache", "True"])
+            args.extend(["--cache-dir", params.cache_dir])
 
         return args
 
