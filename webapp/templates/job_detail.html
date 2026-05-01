@@ -143,9 +143,9 @@
                     <dt>Status</dt>
                     <dd><span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span></dd>
                     <dt>Submitted</dt>
-                    <dd>{{ job.submitted_at }}</dd>
+                    <dd>{{ job.submitted_at | datetimeformat }}</dd>
                     <dt>Last Updated</dt>
-                    <dd>{{ job.updated_at }}</dd>
+                    <dd>{{ job.updated_at | datetimeformat }}</dd>
                     <dt>Job Directory</dt>
                     <dd><code>{{ job.job_dir }}</code></dd>
                     {% if job.child_job_ids %}
@@ -176,6 +176,11 @@
                     <i class="bi bi-table me-1"></i>View Results
                 </a>
                 {% endif %}
+
+                <a href="{{ url_for('jobs.receptor_pdbqt', job_id=job.job_id) }}"
+                   class="btn btn-outline-primary w-100 mb-2">
+                    <i class="bi bi-box-arrow-down me-1"></i>Download Receptor PDBQT
+                </a>
 
                 <a href="{{ url_for('dashboard.index') }}" class="btn btn-outline-secondary w-100">
                     <i class="bi bi-arrow-left me-1"></i>Back to Dashboard

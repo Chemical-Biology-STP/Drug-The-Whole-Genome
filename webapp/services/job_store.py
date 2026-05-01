@@ -195,3 +195,36 @@ class JobStore:
             for job in data["jobs"]
             if job["status"] in ("PENDING", "RUNNING")
         ]
+
+    def delete_job(self, job_id: str) -> bool:
+        """Remove a job record from the store.
+
+        Parameters
+        ----------
+        job_id:
+            The SLURM job ID of the record to remove.
+
+        Returns
+        -------
+        bool
+            ``True`` if a record was found and removed, ``False`` otherwise.
+        """
+        with open(self._store_path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                content = f.read()
+                if not content.strip():
+                    return False
+                data = json.loads(content)
+                original_len = len(data["jobs"])
+                data["jobs"] = [j for j in data["jobs"] if j["job_id"] != job_id]
+                if len(data["jobs"]) == original_len:
+                    return False
+                f.seek(0)
+                f.truncate()
+                json.dump(data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+                return True
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)

@@ -23,6 +23,89 @@ UPLOAD_FOLDER = os.path.join(_WEBAPP_DIR, "uploads")
 SESSION_FILE_DIR = os.path.join(_WEBAPP_DIR, "flask_session")
 
 # ---------------------------------------------------------------------------
+# Pre-encoded library paths
+# ---------------------------------------------------------------------------
+
+# Directory containing pre-built molecule LMDB files
+LIBRARIES_DIR = os.path.join(PROJECT_ROOT, "data", "libraries")
+
+# Directory containing pre-encoded molecule embedding caches
+ENCODED_MOL_EMBS_DIR = os.path.join(PROJECT_ROOT, "data", "encoded_mol_embs")
+
+
+def list_available_libraries():
+    """Return a list of pre-built libraries available for screening.
+
+    Scans LIBRARIES_DIR for .lmdb files and checks whether a matching
+    pre-encoded embedding cache exists in ENCODED_MOL_EMBS_DIR.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has keys:
+        - ``name``: library stem (e.g. "enamine_dds10")
+        - ``lmdb_path``: absolute path to the LMDB file
+        - ``cache_dirs``: dict mapping fold_version -> cache_dir path (only
+          entries where all fold pkl files exist are included)
+        - ``has_cache``: True if at least one complete fold cache exists
+        - ``compound_count``: number of entries in the LMDB (or None on error)
+    """
+    import lmdb as _lmdb
+
+    libraries = []
+
+    if not os.path.isdir(LIBRARIES_DIR):
+        return libraries
+
+    for fname in sorted(os.listdir(LIBRARIES_DIR)):
+        if not fname.endswith(".lmdb"):
+            continue
+        name = fname[:-5]  # strip .lmdb
+        lmdb_path = os.path.join(LIBRARIES_DIR, fname)
+
+        # Count compounds in the LMDB
+        compound_count = None
+        try:
+            env = _lmdb.open(lmdb_path, readonly=True, lock=False, subdir=False)
+            with env.begin() as txn:
+                compound_count = txn.stat()["entries"]
+            env.close()
+        except Exception:
+            pass
+
+        # Check for pre-encoded caches — both flat layout (legacy) and
+        # hash-subdirectory layout (new).
+        cache_dirs = {}
+
+        for fold_version, n_folds in [("6_folds", 6), ("8_folds", 8)]:
+            # Flat layout: data/encoded_mol_embs/<fold_version>/
+            flat_dir = os.path.join(ENCODED_MOL_EMBS_DIR, fold_version)
+            if all(
+                os.path.exists(os.path.join(flat_dir, f"fold{i}.pkl"))
+                for i in range(n_folds)
+            ):
+                cache_dirs[fold_version] = flat_dir
+                continue
+
+            # Named layout: data/encoded_mol_embs/<name>/<fold_version>/
+            named_dir = os.path.join(ENCODED_MOL_EMBS_DIR, name, fold_version)
+            if all(
+                os.path.exists(os.path.join(named_dir, f"fold{i}.pkl"))
+                for i in range(n_folds)
+            ):
+                cache_dirs[fold_version] = named_dir
+
+        libraries.append({
+            "name": name,
+            "lmdb_path": lmdb_path,
+            "cache_dirs": cache_dirs,
+            "has_cache": bool(cache_dirs),
+            "compound_count": compound_count,
+        })
+
+    return libraries
+
+# ---------------------------------------------------------------------------
 # File upload limits
 # ---------------------------------------------------------------------------
 
@@ -63,6 +146,9 @@ POLL_INTERVAL = 30  # seconds
 
 # Number of result rows displayed per page in the results table
 RESULTS_PER_PAGE = 50
+
+# Number of jobs displayed per page in the dashboard jobs table
+JOBS_PER_PAGE = 10
 
 # ---------------------------------------------------------------------------
 # Screening parameter defaults

@@ -11,8 +11,9 @@
 
 document.addEventListener('DOMContentLoaded', function () {
     initBindingSiteSelector();
-    initScreeningModeToggle();
+    initAutoScreeningMode();
     initAutoFillTargetName();
+    initLibrarySourceToggle();
 });
 
 /* =========================================================================
@@ -57,42 +58,132 @@ function updateBindingSiteFields(method) {
 }
 
 /* =========================================================================
-   Screening Mode Toggle
+   Auto Screening Mode Selection
    ========================================================================= */
 
-/**
- * Show/hide large-scale screening fields (chunk size, partition, max parallel)
- * based on the selected screening mode.
- */
-function initScreeningModeToggle() {
-    var radios = document.querySelectorAll('input[name="screening_mode"]');
-    if (radios.length === 0) return;
+var LARGE_SCALE_THRESHOLD = 1000000; // 1 million compounds
 
-    radios.forEach(function (radio) {
+/**
+ * Automatically choose Standard vs Large-Scale based on library size.
+ * Watches both the file upload input and the pre-encoded library selector.
+ */
+function initAutoScreeningMode() {
+    var libraryFile    = document.getElementById('library_file');
+    var preencodedSel  = document.getElementById('preencoded_library');
+    var libSourceRadios = document.querySelectorAll('input[name="library_source"]');
+
+    if (libraryFile) {
+        libraryFile.addEventListener('change', function () {
+            estimateUploadedLibrarySize(this.files[0]);
+        });
+    }
+
+    if (preencodedSel) {
+        preencodedSel.addEventListener('change', function () {
+            var opt = this.options[this.selectedIndex];
+            var count = parseInt(opt.getAttribute('data-count'), 10);
+            if (!isNaN(count)) {
+                setScreeningMode(count);
+            } else {
+                setScreeningMode(null);
+            }
+        });
+    }
+
+    // Re-evaluate when the user switches between upload / pre-encoded
+    libSourceRadios.forEach(function (radio) {
         radio.addEventListener('change', function () {
-            updateScreeningModeFields(this.value);
+            if (this.value === 'preencoded' && preencodedSel) {
+                var opt = preencodedSel.options[preencodedSel.selectedIndex];
+                var count = parseInt(opt.getAttribute('data-count'), 10);
+                setScreeningMode(isNaN(count) ? null : count);
+            } else {
+                // Switched back to upload — re-check the file if one is selected
+                if (libraryFile && libraryFile.files && libraryFile.files.length > 0) {
+                    estimateUploadedLibrarySize(libraryFile.files[0]);
+                } else {
+                    setScreeningMode(null);
+                }
+            }
         });
     });
-
-    // Set initial state based on any pre-selected radio
-    var checked = document.querySelector('input[name="screening_mode"]:checked');
-    if (checked) {
-        updateScreeningModeFields(checked.value);
-    }
 }
 
 /**
- * Show large-scale fields when "large_scale" is selected, hide otherwise.
- * @param {string} mode - The selected screening mode value
+ * Estimate compound count from an uploaded file and update the mode.
+ * - .sdf: count "$$$$" record separators
+ * - .smi / .smiles / .txt: count non-empty lines
+ * Uses a FileReader to read the file content in the browser.
+ * @param {File} file
  */
-function updateScreeningModeFields(mode) {
-    var largeScaleFields = document.querySelector('.large-scale-fields');
-    if (!largeScaleFields) return;
+function estimateUploadedLibrarySize(file) {
+    if (!file) { setScreeningMode(null); return; }
 
-    if (mode === 'large_scale') {
-        largeScaleFields.classList.add('active');
+    var ext = file.name.split('.').pop().toLowerCase();
+    var reader = new FileReader();
+
+    reader.onload = function (e) {
+        var text = e.target.result;
+        var count;
+        if (ext === 'sdf') {
+            // Each molecule ends with "$$$$"
+            count = (text.match(/\$\$\$\$/g) || []).length;
+        } else {
+            // SMILES / text: one molecule per non-empty line
+            count = text.split('\n').filter(function (l) {
+                return l.trim().length > 0;
+            }).length;
+        }
+        setScreeningMode(count);
+    };
+
+    reader.onerror = function () { setScreeningMode(null); };
+    reader.readAsText(file);
+}
+
+/**
+ * Set the hidden screening_mode input and update the visible badge.
+ * @param {number|null} compoundCount  null means unknown
+ */
+function setScreeningMode(compoundCount) {
+    var input  = document.getElementById('screening_mode');
+    var badge  = document.getElementById('screening-mode-badge');
+    var reason = document.getElementById('screening-mode-reason');
+    var largeScaleFields = document.querySelector('.large-scale-fields');
+
+    if (!input || !badge) return;
+
+    var mode, label, badgeClass, reasonText;
+
+    if (compoundCount === null || isNaN(compoundCount)) {
+        mode       = 'standard';
+        label      = 'Standard';
+        badgeClass = 'bg-secondary';
+        reasonText = 'Select a library to auto-detect.';
+    } else if (compoundCount > LARGE_SCALE_THRESHOLD) {
+        mode       = 'large_scale';
+        label      = 'Large-Scale';
+        badgeClass = 'bg-warning text-dark';
+        reasonText = compoundCount.toLocaleString() + ' compounds — parallel processing required.';
     } else {
-        largeScaleFields.classList.remove('active');
+        mode       = 'standard';
+        label      = 'Standard';
+        badgeClass = 'bg-success';
+        reasonText = compoundCount.toLocaleString() + ' compounds — fits in a single job.';
+    }
+
+    input.value = mode;
+    badge.textContent = label;
+    badge.className = 'badge fs-6 px-3 py-2 ' + badgeClass;
+    if (reason) reason.textContent = reasonText;
+
+    // Show/hide large-scale advanced fields
+    if (largeScaleFields) {
+        if (mode === 'large_scale') {
+            largeScaleFields.classList.add('active');
+        } else {
+            largeScaleFields.classList.remove('active');
+        }
     }
 }
 
@@ -118,4 +209,48 @@ function initAutoFillTargetName() {
             targetNameInput.value = targetName;
         }
     });
+}
+
+/* =========================================================================
+   Library Source Toggle
+   ========================================================================= */
+
+/**
+ * Show/hide the file upload vs pre-encoded library selector based on the
+ * selected library_source radio button.
+ */
+function initLibrarySourceToggle() {
+    var radios = document.querySelectorAll('input[name="library_source"]');
+    if (radios.length === 0) return;
+
+    radios.forEach(function (radio) {
+        radio.addEventListener('change', function () {
+            updateLibrarySourceFields(this.value);
+        });
+    });
+
+    // Set initial state
+    var checked = document.querySelector('input[name="library_source"]:checked');
+    if (checked) {
+        updateLibrarySourceFields(checked.value);
+    }
+}
+
+/**
+ * Show the appropriate library input section.
+ * @param {string} source - 'upload' or 'preencoded'
+ */
+function updateLibrarySourceFields(source) {
+    var uploadFields = document.getElementById('lib-upload-fields');
+    var preencodedFields = document.getElementById('lib-preencoded-fields');
+
+    if (!uploadFields || !preencodedFields) return;
+
+    if (source === 'preencoded') {
+        uploadFields.style.display = 'none';
+        preencodedFields.style.display = 'block';
+    } else {
+        uploadFields.style.display = 'block';
+        preencodedFields.style.display = 'none';
+    }
 }

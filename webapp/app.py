@@ -9,7 +9,7 @@ import os
 import traceback
 import uuid
 
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -63,6 +63,24 @@ def create_app() -> Flask:
         )
 
     # ------------------------------------------------------------------
+    # Jinja2 filters
+    # ------------------------------------------------------------------
+
+    @app.template_filter("datetimeformat")
+    def datetimeformat(value: str) -> str:
+        """Format an ISO 8601 timestamp into a human-readable string.
+
+        e.g. "2026-04-30T13:28:53.072353+00:00" → "30 Apr 2026, 13:28 UTC"
+        """
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromisoformat(value)
+            dt = dt.astimezone(timezone.utc)
+            return dt.strftime("%-d %b %Y, %H:%M UTC")
+        except (ValueError, TypeError):
+            return value
+
+    # ------------------------------------------------------------------
     # Register blueprints
     # ------------------------------------------------------------------
 
@@ -77,6 +95,14 @@ def create_app() -> Flask:
     app.register_blueprint(results_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(help_bp)
+
+    # Serve the built MkDocs site at /docs/
+    docs_dir = os.path.join(os.path.dirname(__file__), "static", "docs")
+
+    @app.route("/docs/")
+    @app.route("/docs/<path:filename>")
+    def docs(filename="index.html"):
+        return send_from_directory(docs_dir, filename)
 
     logger.debug("Registered all blueprints: dashboard, jobs, results, logs, help")
 

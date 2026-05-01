@@ -21,12 +21,61 @@
 
             <!-- Compound Library File -->
             <div class="mb-3">
-                <label for="library_file" class="form-label">
+                <label class="form-label">
                     Compound Library
                     <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
-                       data-bs-title="Upload the compound library to screen against the receptor. Supported formats: SDF, SMI, SMILES, or TXT."></i>
+                       data-bs-title="Upload a compound library file, or select a pre-encoded library already on the server to skip the encoding step."></i>
                 </label>
-                <input type="file" class="form-control" id="library_file" name="library_file" accept=".sdf,.smi,.smiles,.txt" />
+
+                <!-- Library source toggle -->
+                <div class="mb-2">
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="library_source"
+                               id="lib_source_upload" value="upload" checked />
+                        <label class="form-check-label" for="lib_source_upload">Upload file</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" name="library_source"
+                               id="lib_source_preencoded" value="preencoded"
+                               {% if not available_libraries %}disabled{% endif %} />
+                        <label class="form-check-label" for="lib_source_preencoded">
+                            Use pre-encoded library
+                            {% if not available_libraries %}
+                            <span class="text-muted small">(none available)</span>
+                            {% endif %}
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Upload fields -->
+                <div id="lib-upload-fields">
+                    <input type="file" class="form-control" id="library_file" name="library_file" accept=".sdf,.smi,.smiles,.txt" />
+                </div>
+
+                <!-- Pre-encoded library selector -->
+                <div id="lib-preencoded-fields" style="display:none;">
+                    <select class="form-select" name="preencoded_library" id="preencoded_library">
+                        <option value="" data-count="">— Select a library —</option>
+                        {% for lib in available_libraries %}
+                        <option value="{{ lib.name }}"
+                                data-count="{{ lib.compound_count if lib.compound_count is not none else '' }}">
+                            {{ lib.name }}
+                            {% if lib.compound_count is not none %}
+                            ({{ "{:,}".format(lib.compound_count) }} compounds)
+                            {% endif %}
+                            {% if lib.has_cache %}
+                            ⚡
+                            {% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    {% if available_libraries %}
+                    <div class="form-text text-success mt-1">
+                        <i class="bi bi-lightning-charge me-1"></i>
+                        Libraries marked ⚡ have pre-computed embeddings — the encoding step will be skipped, making screening significantly faster.
+                    </div>
+                    {% endif %}
+                </div>
             </div>
 
             <!-- Binding Site Method -->
@@ -125,21 +174,23 @@
                 <input type="number" class="form-control" id="top_fraction" name="top_fraction" value="0.02" step="any" />
             </div>
 
-            <!-- Screening Mode -->
+            <!-- Screening Mode (auto-selected based on library size) -->
             <div class="mb-3">
                 <label class="form-label">
                     Screening Mode
                     <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
-                       data-bs-title="Standard mode runs everything in a single job and works for libraries up to about 1 million compounds. Large-scale mode splits the library into chunks and processes them in parallel, which is needed for bigger libraries."></i>
+                       data-bs-title="Automatically chosen based on library size. Standard mode handles up to 1 million compounds in a single job. Large-Scale mode splits bigger libraries into parallel chunks."></i>
                 </label>
 
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="screening_mode" id="mode_standard" value="standard" checked />
-                    <label class="form-check-label" for="mode_standard">Standard</label>
-                </div>
-                <div class="form-check">
-                    <input class="form-check-input" type="radio" name="screening_mode" id="mode_large_scale" value="large_scale" />
-                    <label class="form-check-label" for="mode_large_scale">Large-Scale</label>
+                <!-- Hidden input submitted with the form -->
+                <input type="hidden" name="screening_mode" id="screening_mode" value="standard" />
+
+                <!-- Read-only badge shown to the user -->
+                <div id="screening-mode-display" class="d-flex align-items-center gap-2">
+                    <span id="screening-mode-badge" class="badge bg-secondary fs-6 px-3 py-2">
+                        Standard
+                    </span>
+                    <span id="screening-mode-reason" class="text-muted small"></span>
                 </div>
 
                 <!-- Large-scale fields -->
@@ -184,7 +235,12 @@
 <!-- Job List -->
 <div class="row mt-5">
     <div class="col-lg-10 mx-auto">
-        <h2 class="mb-4"><i class="bi bi-list-task me-2"></i>Your Jobs</h2>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="mb-0"><i class="bi bi-list-task me-2"></i>Your Jobs</h2>
+            {% if pagination.total_jobs > 0 %}
+            <span class="text-muted small">{{ pagination.total_jobs }} job{{ 's' if pagination.total_jobs != 1 }}</span>
+            {% endif %}
+        </div>
 
         {% if jobs %}
         <div class="table-responsive">
@@ -197,6 +253,7 @@
                         <th>Mode</th>
                         <th>Submitted</th>
                         <th>Status</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -206,13 +263,52 @@
                         <td>{{ job.target_name }}</td>
                         <td>{{ job.library_name }}</td>
                         <td>{{ job.screening_mode }}</td>
-                        <td>{{ job.submitted_at }}</td>
+                        <td>{{ job.submitted_at | datetimeformat }}</td>
                         <td><span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span></td>
+                        <td>
+                            {% if job.status not in ('PENDING', 'RUNNING') %}
+                            <form method="POST" action="/jobs/{{ job.job_id }}/delete"
+                                  onsubmit="return confirm('Delete job {{ job.job_id }}? This cannot be undone.');"
+                                  style="display:inline;">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete job">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+
+        <!-- Pagination -->
+        {% if pagination.total_pages > 1 %}
+        <nav aria-label="Jobs pagination">
+            <ul class="pagination pagination-sm justify-content-center">
+                <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                    <a class="page-link"
+                       href="{% if pagination.has_prev %}{{ url_for('dashboard.index', page=pagination.page - 1) }}{% else %}#{% endif %}"
+                       {% if not pagination.has_prev %}tabindex="-1" aria-disabled="true"{% endif %}>
+                        Previous
+                    </a>
+                </li>
+                {% for p in range(1, pagination.total_pages + 1) %}
+                <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                    <a class="page-link" href="{{ url_for('dashboard.index', page=p) }}">{{ p }}</a>
+                </li>
+                {% endfor %}
+                <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                    <a class="page-link"
+                       href="{% if pagination.has_next %}{{ url_for('dashboard.index', page=pagination.page + 1) }}{% else %}#{% endif %}"
+                       {% if not pagination.has_next %}tabindex="-1" aria-disabled="true"{% endif %}>
+                        Next
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        {% endif %}
+
         {% else %}
         <p class="text-muted">No jobs submitted yet.</p>
         {% endif %}

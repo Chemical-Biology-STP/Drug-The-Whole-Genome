@@ -18,11 +18,12 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     session,
     url_for,
 )
 
-from webapp.config import PROJECT_ROOT
+from webapp.config import PROJECT_ROOT, list_available_libraries
 from webapp.services.file_upload import FileUploadHandler, ValidationError
 from webapp.services.job_store import JobStore
 from webapp.services.job_submission import AuthorizationError, JobSubmissionService
@@ -103,25 +104,50 @@ def submit():
             except ValidationError as e:
                 errors.append(str(e))
 
-    # Library file (required)
-    library_file = request.files.get("library_file")
+    # Library source: either upload a file or select a pre-encoded library
+    library_source = request.form.get("library_source", "upload")
     library_path: str | None = None
-    if not library_file or not library_file.filename:
-        errors.append(
-            "Compound library is required. Accepted formats: .sdf, .smi, .smiles, .txt"
-        )
+    use_preencoded_library = False
+    preencoded_library_name: str | None = None
+    cache_dir: str | None = None
+
+    if library_source == "preencoded":
+        # User selected a pre-built library from the server
+        selected_lib = request.form.get("preencoded_library", "").strip()
+        if not selected_lib:
+            errors.append("Please select a pre-encoded library.")
+        else:
+            # Look up the library in the available list
+            available = {lib["name"]: lib for lib in list_available_libraries()}
+            if selected_lib not in available:
+                errors.append(f"Unknown library: {selected_lib!r}. Please select from the list.")
+            else:
+                lib_info = available[selected_lib]
+                library_path = lib_info["lmdb_path"]
+                use_preencoded_library = lib_info["has_cache"]
+                preencoded_library_name = selected_lib
+                # Prefer 6_folds cache; fall back to 8_folds
+                cache_dir = lib_info["cache_dirs"].get("6_folds") or \
+                            lib_info["cache_dirs"].get("8_folds")
     else:
-        if not validate_file_extension(library_file.filename, "library"):
+        # Upload mode
+        library_file = request.files.get("library_file")
+        if not library_file or not library_file.filename:
             errors.append(
                 "Compound library is required. Accepted formats: .sdf, .smi, .smiles, .txt"
             )
         else:
-            try:
-                library_path = upload_handler.validate_and_save(
-                    library_file, session_id, "library"
+            if not validate_file_extension(library_file.filename, "library"):
+                errors.append(
+                    "Compound library is required. Accepted formats: .sdf, .smi, .smiles, .txt"
                 )
-            except ValidationError as e:
-                errors.append(str(e))
+            else:
+                try:
+                    library_path = upload_handler.validate_and_save(
+                        library_file, session_id, "library"
+                    )
+                except ValidationError as e:
+                    errors.append(str(e))
 
     # ------------------------------------------------------------------
     # 2. Validate binding site method and fields
@@ -249,6 +275,9 @@ def submit():
         chunk_size=chunk_size,
         partition=request.form.get("partition", "ga100"),
         max_parallel=int(request.form.get("max_parallel", "50")),
+        use_preencoded_library=use_preencoded_library,
+        preencoded_library_name=preencoded_library_name,
+        cache_dir=cache_dir,
     )
 
     submission_service = _get_submission_service()
@@ -306,3 +335,69 @@ def cancel(job_id: str):
 
     flash("Job cancelled.", "success")
     return redirect(url_for("jobs.detail", job_id=job_id))
+
+
+@jobs_bp.route("/<job_id>/delete", methods=["POST"])
+def delete(job_id: str):
+    """Delete a job record from the store.
+
+    Only completed, failed, cancelled, or timed-out jobs may be deleted.
+    Active jobs must be cancelled first. Verifies session ownership before
+    removing the record.
+    """
+    session_id = _get_session_id()
+    job_store = _get_job_store()
+    record = job_store.get_job(job_id)
+
+    if record is None:
+        abort(404)
+
+    if record.session_id != session_id:
+        abort(403)
+
+    if record.status in ("PENDING", "RUNNING"):
+        flash("Cancel the job before deleting it.", "warning")
+        return redirect(url_for("jobs.detail", job_id=job_id))
+
+    job_store.delete_job(job_id)
+    flash(f"Job {job_id} deleted.", "success")
+    return redirect(url_for("dashboard.index"))
+
+
+@jobs_bp.route("/<job_id>/receptor_pdbqt", methods=["GET"])
+def receptor_pdbqt(job_id: str):
+    """Convert the receptor PDB to PDBQT and serve as a download.
+
+    Uses AutoDockTools prepare_receptor4 to add hydrogens, remove waters
+    and non-standard residues, and assign Gasteiger charges.
+    """
+    session_id = _get_session_id()
+    job_store = _get_job_store()
+    record = job_store.get_job(job_id)
+
+    if record is None:
+        abort(404)
+    if record.session_id != session_id:
+        abort(403)
+
+    pdb_path = record.params.get("pdb_path")
+    if not pdb_path or not os.path.exists(pdb_path):
+        flash("Receptor PDB file is no longer available.", "danger")
+        return redirect(url_for("jobs.detail", job_id=job_id))
+
+    from webapp.services.pdbqt_converter import receptor_pdb_to_pdbqt
+    import io as _io
+
+    try:
+        pdbqt_bytes = receptor_pdb_to_pdbqt(pdb_path)
+    except Exception as e:
+        flash(f"PDBQT conversion failed: {e}", "danger")
+        return redirect(url_for("jobs.detail", job_id=job_id))
+
+    download_name = f"{record.target_name}_receptor.pdbqt"
+    return send_file(
+        _io.BytesIO(pdbqt_bytes),
+        mimetype="chemical/x-pdbqt",
+        as_attachment=True,
+        download_name=download_name,
+    )

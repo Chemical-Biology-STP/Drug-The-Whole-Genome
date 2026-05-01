@@ -2,6 +2,10 @@
 
 {% block title %}Results — {{ job.target_name }} vs {{ job.library_name }}{% endblock %}
 
+{% block extra_head %}
+<script src="https://unpkg.com/@rdkit/rdkit/Code/MinimalLib/dist/RDKit_minimal.js"></script>
+{% endblock %}
+
 {% block content %}
 <!-- Breadcrumb Navigation -->
 <nav aria-label="breadcrumb">
@@ -32,11 +36,63 @@
     </div>
 </div>
 
-<!-- Download Button -->
-<div class="d-flex justify-content-end mb-3">
+<!-- Download Buttons -->
+<div class="d-flex justify-content-end gap-2 mb-3">
     <a href="{{ url_for('results.download', job_id=job.job_id) }}" class="btn btn-success">
-        <i class="bi bi-download me-1"></i>Download Results
+        <i class="bi bi-download me-1"></i>Download CSV
     </a>
+    <button id="btn-download-sdf" class="btn btn-outline-success"
+            data-url="{{ url_for('results.download_sdf', job_id=job.job_id) }}">
+        <i class="bi bi-box-arrow-down me-1"></i>Download SDF (3D)
+    </button>
+    <button id="btn-download-pdbqt" class="btn btn-outline-primary"
+            data-url="{{ url_for('results.download_pdbqt', job_id=job.job_id) }}">
+        <i class="bi bi-box-arrow-down me-1"></i>Download PDBQT (AutoDock)
+    </button>
+</div>
+
+<!-- SDF Generation Modal -->
+<div class="modal fade" id="sdfModal" tabindex="-1" aria-labelledby="sdfModalLabel"
+     aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h5 class="modal-title" id="sdfModalLabel">
+                    <i class="bi bi-gear-wide-connected me-2"></i>Generating 3D Structures
+                </h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-success mb-3" role="status" style="width:3rem;height:3rem;">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mb-1">Building 3D conformers for all hits&hellip;</p>
+                <p class="text-muted small mb-0">This may take a minute for large result sets.<br>
+                    Please don't close this page.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- PDBQT Generation Modal -->
+<div class="modal fade" id="pdbqtModal" tabindex="-1" aria-labelledby="pdbqtModalLabel"
+     aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <h5 class="modal-title" id="pdbqtModalLabel">
+                    <i class="bi bi-gear-wide-connected me-2"></i>Preparing AutoDock PDBQT
+                </h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="spinner-border text-primary mb-3" role="status" style="width:3rem;height:3rem;">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mb-1">Generating 3D conformers and assigning Gasteiger charges&hellip;</p>
+                <p class="text-muted small mb-0">This may take a few minutes for large result sets.<br>
+                    Please don't close this page.</p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Results Table -->
@@ -45,20 +101,28 @@
         <thead class="table-dark">
             <tr>
                 <th scope="col">Rank</th>
+                <th scope="col">Structure</th>
                 <th scope="col">SMILES</th>
                 <th scope="col">Score</th>
             </tr>
         </thead>
         <tbody>
-            {% for rank, smiles, score in pagination.items %}
+            {% for rank, smiles, score in pagination['items'] %}
             <tr>
                 <td>{{ rank }}</td>
-                <td><code>{{ smiles }}</code></td>
+                <td>
+                    <canvas id="mol-{{ rank }}"
+                            data-smiles="{{ smiles }}"
+                            width="200" height="150"
+                            style="display:block;">
+                    </canvas>
+                </td>
+                <td><code style="font-size:0.75em; word-break:break-all;">{{ smiles }}</code></td>
                 <td>{{ "%.4f"|format(score) }}</td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="3" class="text-center text-muted">No results found.</td>
+                <td colspan="4" class="text-center text-muted">No results found.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -117,4 +181,82 @@
     </ul>
 </nav>
 {% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── SDF download with progress modal ────────────────────────────────────────
+(function () {
+    function makeDownloadHandler(btnId, modalId, cookieName) {
+        var btn = document.getElementById(btnId);
+        if (!btn) return;
+        var modal = new bootstrap.Modal(document.getElementById(modalId));
+        var pollInterval = null;
+
+        function getCookie(name) {
+            var match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+            return match ? decodeURIComponent(match[1]) : null;
+        }
+        function clearCookie(name) {
+            document.cookie = name + '=; Max-Age=0; path=/';
+        }
+
+        btn.addEventListener('click', function () {
+            btn.disabled = true;
+            clearCookie(cookieName);
+            modal.show();
+            pollInterval = setInterval(function () {
+                if (getCookie(cookieName)) {
+                    clearInterval(pollInterval);
+                    clearCookie(cookieName);
+                    modal.hide();
+                    btn.disabled = false;
+                }
+            }, 500);
+            window.location.href = btn.getAttribute('data-url');
+        });
+    }
+
+    makeDownloadHandler('btn-download-sdf',   'sdfModal',   'sdf_ready');
+    makeDownloadHandler('btn-download-pdbqt', 'pdbqtModal', 'pdbqt_ready');
+})();
+
+// ── RDKit 2D structure rendering ─────────────────────────────────────────────
+window.initRDKitModule().then(function(RDKit) {
+    var dpr = window.devicePixelRatio || 1;
+    document.querySelectorAll('canvas[data-smiles]').forEach(function(canvas) {
+        var smiles = canvas.getAttribute('data-smiles');
+        var displayW = canvas.width;
+        var displayH = canvas.height;
+
+        canvas.width  = displayW * dpr;
+        canvas.height = displayH * dpr;
+        canvas.style.width  = displayW + 'px';
+        canvas.style.height = displayH + 'px';
+
+        try {
+            var mol = RDKit.get_mol(smiles);
+            if (mol && mol.is_valid()) {
+                mol.draw_to_canvas(canvas, canvas.width, canvas.height);
+            } else {
+                drawFallback(canvas);
+            }
+            if (mol) mol.delete();
+        } catch(e) {
+            drawFallback(canvas);
+        }
+    });
+});
+
+function drawFallback(canvas) {
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#f8f9fa';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#6c757d';
+    ctx.font = (12 * (window.devicePixelRatio || 1)) + 'px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Structure unavailable', canvas.width / 2, canvas.height / 2);
+}
+</script>
 {% endblock %}

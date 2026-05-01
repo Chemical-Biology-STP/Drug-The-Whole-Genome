@@ -35,6 +35,9 @@ class JobParams:
     chunk_size: int = 1_000_000            # Large-scale only
     partition: str = 'ga100'               # Large-scale only
     max_parallel: int = 50                 # Large-scale only
+    use_preencoded_library: bool = False   # Skip encoding, use cached embeddings
+    preencoded_library_name: Optional[str] = None  # Name of pre-built library (e.g. "enamine_dds10")
+    cache_dir: Optional[str] = None        # Explicit path to embedding cache dir
 
     def to_dict(self) -> Dict:
         """Serialize JobParams to a plain dictionary for JSON storage."""
@@ -57,6 +60,9 @@ class JobParams:
             'chunk_size': self.chunk_size,
             'partition': self.partition,
             'max_parallel': self.max_parallel,
+            'use_preencoded_library': self.use_preencoded_library,
+            'preencoded_library_name': self.preencoded_library_name,
+            'cache_dir': self.cache_dir,
         }
 
     @classmethod
@@ -81,6 +87,9 @@ class JobParams:
             chunk_size=data.get('chunk_size', 1_000_000),
             partition=data.get('partition', 'ga100'),
             max_parallel=data.get('max_parallel', 50),
+            use_preencoded_library=data.get('use_preencoded_library', False),
+            preencoded_library_name=data.get('preencoded_library_name'),
+            cache_dir=data.get('cache_dir'),
         )
 
 
