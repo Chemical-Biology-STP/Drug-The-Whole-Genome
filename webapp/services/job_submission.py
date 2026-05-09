@@ -208,6 +208,8 @@ class JobSubmissionService:
                              stderr=f"Could not parse job IDs from output: {out!r}")
 
         primary_job_id = child_job_ids[0]
+        # For large-scale jobs the last child is the screen job — use its log
+        screen_job_id = child_job_ids[-1]
         now = datetime.now(timezone.utc).isoformat()
         record = JobRecord(
             job_id=primary_job_id,
@@ -221,7 +223,7 @@ class JobSubmissionService:
             updated_at=now,
             params=params.to_dict(),
             job_dir=f"{REMOTE_JOBS_DIR}/{job_dir_name}",
-            log_path=f"{REMOTE_JOBS_DIR}/logs/slurm_{primary_job_id}.log",
+            log_path=f"{REMOTE_JOBS_DIR}/logs/screen_{job_dir_name}_{screen_job_id}.log",
             results_path=None,
             error_message=None,
             child_job_ids=child_job_ids,
