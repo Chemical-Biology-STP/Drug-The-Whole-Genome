@@ -1,239 +1,155 @@
-"""Job submission, detail, and cancellation route handlers.
-
-Provides the jobs blueprint with routes for submitting screening jobs,
-viewing job details, and cancelling active jobs.
-
-Requirements: 3.4, 3.5, 4.6, 7.4, 7.5, 7.6, 8.1-8.4, 9.4, 11.4, 12.4, 15.1-15.4
-"""
+"""Job submission, detail, and cancellation route handlers."""
 
 from __future__ import annotations
 
 import os
-import uuid
 
 from flask import (
-    Blueprint,
-    abort,
-    flash,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
+    Blueprint, abort, flash, redirect, render_template,
+    request, session, url_for,
 )
 
-from webapp.config import PROJECT_ROOT
+from webapp.config import ADMIN_EMAIL, PROJECT_ROOT
 from webapp.services.file_upload import FileUploadHandler, ValidationError
 from webapp.services.job_store import JobStore
 from webapp.services.job_submission import AuthorizationError, JobSubmissionService
 from webapp.services.models import JobParams
 from webapp.services.slurm_client import SlurmClient, SlurmError
 from webapp.services.validation import (
-    derive_target_name,
-    validate_binding_site,
-    validate_file_extension,
-    validate_params,
+    derive_target_name, validate_file_extension, validate_params,
 )
 
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/jobs")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_session_id() -> str:
-    """Return the current session ID, creating one if it does not exist."""
-    if "id" not in session:
-        session["id"] = str(uuid.uuid4())
-    return session["id"]
+def _get_email() -> str:
+    return session.get("email", "")
 
 
 def _get_job_store() -> JobStore:
-    """Instantiate a JobStore pointed at the canonical data path."""
-    store_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "data", "jobs.json"
-    )
+    store_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "jobs.json")
     return JobStore(store_path)
 
 
 def _get_submission_service() -> JobSubmissionService:
-    """Instantiate a JobSubmissionService with its dependencies."""
-    slurm_client = SlurmClient()
-    job_store = _get_job_store()
-    return JobSubmissionService(slurm_client, job_store, PROJECT_ROOT)
+    return JobSubmissionService(SlurmClient(), _get_job_store(), PROJECT_ROOT)
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+def _owns_record(record, email: str) -> bool:
+    """Return True if email owns the record or is admin."""
+    return record.email == email or email.lower() == ADMIN_EMAIL.lower()
 
 
 @jobs_bp.route("/submit", methods=["POST"])
 def submit():
-    """Handle job submission form.
+    email = _get_email()
+    if not email:
+        flash("Please log in to submit a job.", "danger")
+        return redirect(url_for("login"))
 
-    Validates form inputs, uploads files, builds JobParams, and submits
-    the job via the appropriate service method. On success, flashes a
-    confirmation message and redirects to the job detail page. On failure,
-    flashes error messages and redirects back to the dashboard.
-    """
-    session_id = _get_session_id()
     upload_handler = FileUploadHandler()
     errors: list[str] = []
 
-    # ------------------------------------------------------------------
-    # 1. Validate and upload required files
-    # ------------------------------------------------------------------
-
-    # PDB file (required)
+    # PDB file
     pdb_file = request.files.get("pdb_file")
     pdb_path: str | None = None
     if not pdb_file or not pdb_file.filename:
-        errors.append("Receptor PDB file is required. Accepted format: .pdb")
+        errors.append("Receptor PDB file is required.")
     else:
         if not validate_file_extension(pdb_file.filename, "pdb"):
-            errors.append("Receptor PDB file is required. Accepted format: .pdb")
+            errors.append("Receptor PDB file must be .pdb format.")
         else:
             try:
-                pdb_path = upload_handler.validate_and_save(
-                    pdb_file, session_id, "pdb"
-                )
+                pdb_path = upload_handler.validate_and_save(pdb_file, email, "pdb")
             except ValidationError as e:
                 errors.append(str(e))
 
-    # Library file (required)
+    # Library file
     library_file = request.files.get("library_file")
     library_path: str | None = None
     if not library_file or not library_file.filename:
-        errors.append(
-            "Compound library is required. Accepted formats: .sdf, .smi, .smiles, .txt"
-        )
+        errors.append("Compound library is required.")
     else:
         if not validate_file_extension(library_file.filename, "library"):
-            errors.append(
-                "Compound library is required. Accepted formats: .sdf, .smi, .smiles, .txt"
-            )
+            errors.append("Library must be .sdf, .smi, .smiles, or .txt.")
         else:
             try:
-                library_path = upload_handler.validate_and_save(
-                    library_file, session_id, "library"
-                )
+                library_path = upload_handler.validate_and_save(library_file, email, "library")
             except ValidationError as e:
                 errors.append(str(e))
 
-    # ------------------------------------------------------------------
-    # 2. Validate binding site method and fields
-    # ------------------------------------------------------------------
-
+    # Binding site
     binding_site_method = request.form.get("binding_site_method", "")
     ligand_path: str | None = None
     residue_name: str | None = None
-    center_x: float | None = None
-    center_y: float | None = None
-    center_z: float | None = None
+    center_x = center_y = center_z = None
     binding_residues: str | None = None
     chain_id: str | None = None
 
     if not binding_site_method:
-        errors.append(
-            "A binding site definition is required. Choose one of the four methods."
-        )
+        errors.append("A binding site definition is required.")
     else:
         if binding_site_method == "ligand":
             ligand_file = request.files.get("ligand_file")
             if not ligand_file or not ligand_file.filename:
-                errors.append(
-                    "Ligand file is required for this binding site method. "
-                    "Accepted formats: .pdb, .sdf"
-                )
+                errors.append("Ligand file is required for this binding site method.")
+            elif not validate_file_extension(ligand_file.filename, "ligand"):
+                errors.append("Ligand file must be .pdb or .sdf.")
             else:
-                if not validate_file_extension(ligand_file.filename, "ligand"):
-                    errors.append(
-                        "Ligand file is required for this binding site method. "
-                        "Accepted formats: .pdb, .sdf"
-                    )
-                else:
-                    try:
-                        ligand_path = upload_handler.validate_and_save(
-                            ligand_file, session_id, "ligand"
-                        )
-                    except ValidationError as e:
-                        errors.append(str(e))
-
+                try:
+                    ligand_path = upload_handler.validate_and_save(ligand_file, email, "ligand")
+                except ValidationError as e:
+                    errors.append(str(e))
         elif binding_site_method == "residue":
             residue_name = request.form.get("residue_name", "").strip()
             if not residue_name:
                 errors.append("Residue name is required (e.g., JHN).")
-
         elif binding_site_method == "center":
             try:
                 center_x = float(request.form.get("center_x", ""))
                 center_y = float(request.form.get("center_y", ""))
                 center_z = float(request.form.get("center_z", ""))
             except (ValueError, TypeError):
-                errors.append(
-                    "All three coordinates (X, Y, Z) are required and must be numbers."
-                )
-
+                errors.append("All three coordinates (X, Y, Z) are required and must be numbers.")
         elif binding_site_method == "binding_residues":
             binding_residues = request.form.get("binding_residues", "").strip()
             if not binding_residues:
                 errors.append("At least one residue number is required.")
             chain_id = request.form.get("chain_id", "").strip() or None
-
         else:
-            errors.append(
-                "A binding site definition is required. Choose one of the four methods."
-            )
+            errors.append("Unknown binding site method.")
 
-    # ------------------------------------------------------------------
-    # 3. Validate numeric parameters
-    # ------------------------------------------------------------------
-
+    # Numeric params
     screening_mode = request.form.get("screening_mode", "standard")
-
     try:
         cutoff = float(request.form.get("cutoff", "10.0"))
     except (ValueError, TypeError):
-        cutoff = -1.0  # Will fail validation
-
+        cutoff = -1.0
     try:
         top_fraction = float(request.form.get("top_fraction", "0.02"))
     except (ValueError, TypeError):
-        top_fraction = -1.0  # Will fail validation
-
+        top_fraction = -1.0
     try:
         chunk_size = int(request.form.get("chunk_size", "1000000"))
     except (ValueError, TypeError):
-        chunk_size = 0  # Will fail validation
+        chunk_size = 0
 
-    param_errors = validate_params(cutoff, top_fraction, chunk_size)
-    for field_name, msg in param_errors.items():
+    for _, msg in validate_params(cutoff, top_fraction, chunk_size).items():
         errors.append(msg)
-
-    # ------------------------------------------------------------------
-    # 4. If there are validation errors, flash them and redirect back
-    # ------------------------------------------------------------------
 
     if errors:
         for err in errors:
             flash(err, "danger")
         return redirect(url_for("dashboard.index"))
 
-    # ------------------------------------------------------------------
-    # 5. Build JobParams and submit
-    # ------------------------------------------------------------------
-
     target_name = request.form.get("target_name", "").strip()
     if not target_name and pdb_path:
         target_name = derive_target_name(pdb_path)
 
     params = JobParams(
-        session_id=session_id,
-        pdb_path=pdb_path,  # type: ignore[arg-type]
-        library_path=library_path,  # type: ignore[arg-type]
+        session_id=email,  # use email as session_id for compatibility
+        pdb_path=pdb_path,
+        library_path=library_path,
         binding_site_method=binding_site_method,
         ligand_path=ligand_path,
         residue_name=residue_name,
@@ -251,58 +167,46 @@ def submit():
         max_parallel=int(request.form.get("max_parallel", "50")),
     )
 
-    submission_service = _get_submission_service()
-
+    service = _get_submission_service()
     try:
         if screening_mode == "large_scale":
-            record = submission_service.submit_large_scale(params)
+            record = service.submit_large_scale(params, email)
         else:
-            record = submission_service.submit_standard(params)
+            record = service.submit_standard(params, email)
     except SlurmError as e:
         flash(f"Job submission failed: {e.stderr}", "danger")
         return redirect(url_for("dashboard.index"))
 
-    flash(f"Job submitted successfully! SLURM Job ID: {record.job_id}", "success")
+    flash(f"Job submitted! SLURM Job ID: {record.job_id}", "success")
     return redirect(url_for("jobs.detail", job_id=record.job_id))
 
 
 @jobs_bp.route("/<job_id>", methods=["GET"])
 def detail(job_id: str):
-    """Display the job detail page.
-
-    Verifies session ownership and renders the job detail template with
-    all submission parameters, current status, and action links.
-    """
-    session_id = _get_session_id()
-    job_store = _get_job_store()
-    record = job_store.get_job(job_id)
-
+    email = _get_email()
+    if not email:
+        flash("Please log in.", "danger")
+        return redirect(url_for("login"))
+    record = _get_job_store().get_job(job_id)
     if record is None:
         abort(404)
-
-    if record.session_id != session_id:
+    if not _owns_record(record, email):
         abort(403)
-
-    return render_template("job_detail.html", job=record)
+    return render_template("job_detail.html", job=record, current_user=email)
 
 
 @jobs_bp.route("/<job_id>/cancel", methods=["POST"])
 def cancel(job_id: str):
-    """Cancel a PENDING or RUNNING job.
-
-    Verifies session ownership, calls scancel via the submission service,
-    and redirects back to the job detail page with a status message.
-    """
-    session_id = _get_session_id()
-    submission_service = _get_submission_service()
-
+    email = _get_email()
+    if not email:
+        abort(403)
+    service = _get_submission_service()
     try:
-        submission_service.cancel_job(job_id, session_id)
+        service.cancel_job(job_id, email)
     except AuthorizationError:
         abort(403)
     except SlurmError as e:
         flash(f"Could not cancel job: {e.stderr}", "danger")
         return redirect(url_for("jobs.detail", job_id=job_id))
-
     flash("Job cancelled.", "success")
     return redirect(url_for("jobs.detail", job_id=job_id))
