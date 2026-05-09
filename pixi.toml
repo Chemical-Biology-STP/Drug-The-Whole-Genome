@@ -62,6 +62,8 @@ jupyterlab = "*"
 # Web app
 flask = "==3.1.1"
 flask-session = "==0.8.0"
+bcrypt = ">=4.0,<5"
+requests = ">=2.31,<3"
 
 # Dev/lint (optional, remove if you don't need them)
 hypothesis = "==6.131.15"
