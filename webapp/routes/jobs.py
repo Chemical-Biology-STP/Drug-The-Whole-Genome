@@ -64,18 +64,27 @@ def submit():
             except ValidationError as e:
                 errors.append(str(e))
 
-    # Library file — either upload or HPC path
+    # Library file — upload (regular or chunked), or HPC path
     library_hpc_path = request.form.get("library_hpc_path", "").strip()
+    library_upload_path = request.form.get("library_upload_path", "").strip()
     library_path: str | None = None
     library_is_remote = False
 
     if library_hpc_path:
-        # User provided a path to a file already on the HPC — validate extension only
+        # Path to a file already on the HPC
         if not validate_file_extension(library_hpc_path, "library"):
             errors.append("HPC library path must end in .sdf, .smi, .smiles, or .txt.")
         else:
             library_path = library_hpc_path
             library_is_remote = True
+    elif library_upload_path:
+        # Completed chunked upload — path is local on the web server
+        if not os.path.isfile(library_upload_path):
+            errors.append("Chunked upload not found. Please re-upload the library.")
+        elif not validate_file_extension(library_upload_path, "library"):
+            errors.append("Uploaded library must be .sdf, .smi, .smiles, or .txt.")
+        else:
+            library_path = library_upload_path
     else:
         library_file = request.files.get("library_file")
         if not library_file or not library_file.filename:

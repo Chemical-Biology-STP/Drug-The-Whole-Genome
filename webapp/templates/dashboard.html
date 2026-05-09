@@ -24,7 +24,7 @@
                 <label class="form-label">
                     Compound Library
                     <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
-                       data-bs-title="Upload a compound library (max 2 GB), or enter the full path to a file already on the HPC (e.g. /nemo/.../enamine_real.sdf). Use the HPC path for large libraries."></i>
+                       data-bs-title="Upload any size library with resumable chunked upload, or enter the full path to a file already on the HPC."></i>
                 </label>
 
                 <!-- Tab switcher -->
@@ -39,12 +39,34 @@
                     </label>
                 </div>
 
+                <!-- Upload panel (chunked) -->
                 <div id="lib-upload-panel">
-                    <input type="file" class="form-control" id="library_file" name="library_file"
+                    <input type="file" class="form-control" id="library_file_input"
                            accept=".sdf,.smi,.smiles,.txt" />
-                    <div class="form-text">Accepted: .sdf, .smi, .smiles, .txt — max 2 GB</div>
+                    <div class="form-text">Accepted: .sdf, .smi, .smiles, .txt — any size, resumable</div>
+
+                    <!-- Progress (hidden until upload starts) -->
+                    <div id="lib-upload-progress" class="d-none mt-2">
+                        <div class="d-flex justify-content-between mb-1">
+                            <small id="lib-upload-status" class="text-muted">Uploading…</small>
+                            <small id="lib-upload-pct" class="text-muted">0%</small>
+                        </div>
+                        <div class="progress" style="height:8px;">
+                            <div id="lib-upload-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                 role="progressbar" style="width:0%"></div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-danger mt-1 d-none"
+                                id="lib-upload-cancel">Cancel</button>
+                    </div>
+
+                    <!-- Hidden field populated when upload completes -->
+                    <input type="hidden" name="library_upload_path" id="library_upload_path" value="" />
+                    <!-- Hidden field for regular small-file upload fallback -->
+                    <input type="file" name="library_file" id="library_file" class="d-none"
+                           accept=".sdf,.smi,.smiles,.txt" />
                 </div>
 
+                <!-- HPC path panel -->
                 <div id="lib-hpc-panel" class="d-none">
                     <input type="text" class="form-control font-monospace" id="library_hpc_path"
                            name="library_hpc_path"
@@ -197,9 +219,12 @@
 
             <!-- Submit Button -->
             <div class="d-grid">
-                <button type="submit" class="btn btn-primary btn-lg">
+                <button type="submit" class="btn btn-primary btn-lg" id="submit-btn">
                     <i class="bi bi-rocket-takeoff me-2"></i>Submit Job
                 </button>
+                <div id="submit-upload-warning" class="d-none text-warning small mt-1 text-center">
+                    <i class="bi bi-hourglass-split me-1"></i>Waiting for library upload to complete…
+                </div>
             </div>
         </form>
     </div>

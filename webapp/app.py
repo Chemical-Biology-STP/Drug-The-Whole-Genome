@@ -234,12 +234,14 @@ def create_app() -> Flask:
     from webapp.routes.jobs import jobs_bp
     from webapp.routes.logs import logs_bp
     from webapp.routes.results import results_bp
+    from webapp.routes.upload import upload_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(jobs_bp)
     app.register_blueprint(results_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(help_bp)
+    app.register_blueprint(upload_bp)
 
     # ------------------------------------------------------------------
     # Initialize services
