@@ -139,11 +139,14 @@ class JobMonitor:
     ) -> str:
         """Derive overall job status from a set of child SLURM job IDs.
 
+        Only considers IDs that actually appear in squeue or sacct.
+        IDs not found in either are ignored (may be non-SLURM output noise).
+
         Rules (in priority order):
+        - No known children found → RUNNING (still being submitted)
         - Any child RUNNING/PENDING → RUNNING
         - Any child FAILED/TIMEOUT/etc → FAILED
-        - All children COMPLETED → COMPLETED
-        - No children found anywhere → RUNNING (still being submitted)
+        - All known children COMPLETED → COMPLETED
         """
         statuses = []
         for jid in child_ids:
@@ -151,10 +154,10 @@ class JobMonitor:
                 statuses.append(self._normalize_status(squeue_map[jid]))
             elif jid in sacct_map:
                 statuses.append(self._normalize_status(sacct_map[jid]))
-            # If not found in either, it may not be submitted yet — ignore
+            # IDs not found in squeue or sacct are ignored
 
         if not statuses:
-            return "RUNNING"  # children not in SLURM yet
+            return "RUNNING"  # no children visible in SLURM yet
 
         if any(s in ("PENDING", "RUNNING") for s in statuses):
             return "RUNNING"

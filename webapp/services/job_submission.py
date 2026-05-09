@@ -192,13 +192,16 @@ class JobSubmissionService:
         if out is None:
             raise SlurmError(command=cmd, return_code=None, stderr=err or "")
 
-        all_job_ids = re.findall(r"\b(\d{5,})\b", out)
+        # Parse only "Submitted batch job NNNNN" lines — ignore other numbers in output
+        child_job_ids = re.findall(r"Submitted batch job (\d+)", out)
+        # Deduplicate while preserving order
         seen: set[str] = set()
-        child_job_ids: list[str] = []
-        for jid in all_job_ids:
+        unique_child_ids: list[str] = []
+        for jid in child_job_ids:
             if jid not in seen:
                 seen.add(jid)
-                child_job_ids.append(jid)
+                unique_child_ids.append(jid)
+        child_job_ids = unique_child_ids
 
         if not child_job_ids:
             raise SlurmError(command=cmd, return_code=0,
