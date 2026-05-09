@@ -150,7 +150,8 @@ document.addEventListener('DOMContentLoaded', function () {
     updateLibraryPanel();
 
     // ── Chunked uploader ────────────────────────────────────────────────────
-    var CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk
+    var CHUNK_SIZE = 10 * 1024 * 1024;  // 10 MB per chunk
+    var MAX_PARALLEL = 5;               // upload 5 chunks simultaneously
 
     var fileInput     = document.getElementById('library_file_input');
     var progressWrap  = document.getElementById('lib-upload-progress');
@@ -184,8 +185,8 @@ document.addEventListener('DOMContentLoaded', function () {
             var file = fileInput.files[0];
             if (!file) return;
 
-            // For small files (< 100 MB) use the regular hidden file input
-            if (file.size < 100 * 1024 * 1024) {
+            // For small files (< 20 MB) use the regular hidden file input
+            if (file.size < 20 * 1024 * 1024) {
                 var regularInput = document.getElementById('library_file');
                 // Transfer the file to the hidden regular input via DataTransfer
                 try {
@@ -262,22 +263,24 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function uploadChunks(file, uploadId, totalChunks, alreadyReceived, startCount) {
         var uploadedChunks = startCount + alreadyReceived.length;
+        var alreadySet = new Set(alreadyReceived);
 
-        function uploadNext(index) {
-            if (cancelled) return;
-            if (index >= totalChunks) return; // done handled by server response
+        // Build queue of chunk indices still to upload
+        var queue = [];
+        for (var i = 0; i < totalChunks; i++) {
+            if (!alreadySet.has(i)) queue.push(i);
+        }
 
-            // Skip already-received chunks
-            if (alreadyReceived.indexOf(index) !== -1) {
-                uploadNext(index + 1);
-                return;
-            }
+        var failed = false;
+
+        function uploadChunk(index) {
+            if (cancelled || failed) return Promise.resolve();
 
             var start = index * CHUNK_SIZE;
             var end   = Math.min(start + CHUNK_SIZE, file.size);
             var chunk = file.slice(start, end);
 
-            fetch('/upload/library', {
+            return fetch('/upload/library', {
                 method: 'POST',
                 headers: {
                     'X-Upload-Id':    uploadId,
@@ -293,7 +296,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 return r.json();
             })
             .then(function(data) {
-                if (cancelled) return;
+                if (cancelled || failed) return;
                 uploadedChunks++;
                 var pct = Math.round((uploadedChunks / totalChunks) * 100);
                 progressBar.style.width = pct + '%';
@@ -303,7 +306,6 @@ document.addEventListener('DOMContentLoaded', function () {
                     ' / ' + formatBytes(file.size);
 
                 if (data.done) {
-                    // Upload complete
                     uploadPathField.value = data.path;
                     progressBar.style.width = '100%';
                     progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
@@ -312,23 +314,31 @@ document.addEventListener('DOMContentLoaded', function () {
                     statusLabel.textContent = '✓ ' + file.name + ' ready (' + formatBytes(file.size) + ')';
                     cancelBtn.classList.add('d-none');
                     setSubmitEnabled(true);
-                } else {
-                    uploadNext(index + 1);
                 }
-            })
-            .catch(function(err) {
-                if (cancelled) return;
-                progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
-                progressBar.classList.add('bg-danger');
-                statusLabel.textContent = 'Upload failed: ' + err.message + ' — click Cancel and retry';
-                setSubmitEnabled(true);
             });
         }
 
-        // Find the first chunk not yet received
-        var firstMissing = 0;
-        while (alreadyReceived.indexOf(firstMissing) !== -1) firstMissing++;
-        uploadNext(firstMissing);
+        // Worker: pulls from queue and uploads, then picks the next chunk
+        function worker() {
+            if (cancelled || failed || queue.length === 0) return Promise.resolve();
+            var index = queue.shift();
+            return uploadChunk(index)
+                .then(function() { return worker(); })
+                .catch(function(err) {
+                    if (cancelled) return;
+                    failed = true;
+                    progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+                    progressBar.classList.add('bg-danger');
+                    statusLabel.textContent = 'Upload failed: ' + err.message + ' — click Cancel and retry';
+                    setSubmitEnabled(true);
+                });
+        }
+
+        // Launch MAX_PARALLEL workers simultaneously
+        var workers = [];
+        for (var w = 0; w < Math.min(MAX_PARALLEL, queue.length); w++) {
+            workers.push(worker());
+        }
     }
 
     function generateId() {

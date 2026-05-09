@@ -34,8 +34,8 @@ from webapp.services.validation import validate_file_extension
 
 upload_bp = Blueprint("upload", __name__, url_prefix="/upload")
 
-# Max individual chunk size: 50 MB
-MAX_CHUNK_SIZE = 50 * 1024 * 1024
+# Max individual chunk size: 10 MB
+MAX_CHUNK_SIZE = 10 * 1024 * 1024
 
 # Where in-progress uploads live: webapp/uploads/<email>/chunks/<upload_id>/
 def _chunk_dir(email: str, upload_id: str) -> str:
