@@ -19,7 +19,7 @@ class JobParams:
 
     session_id: str
     pdb_path: str                          # Absolute path to uploaded PDB
-    library_path: str                      # Absolute path to uploaded library
+    library_path: str                      # Absolute path to uploaded library (local) or HPC path
     binding_site_method: str               # 'ligand' | 'residue' | 'center' | 'binding_residues'
     ligand_path: Optional[str] = None      # Path to ligand file (if method='ligand')
     residue_name: Optional[str] = None     # HETATM residue name (if method='residue')
@@ -35,6 +35,7 @@ class JobParams:
     chunk_size: int = 1_000_000            # Large-scale only
     partition: str = 'ga100'               # Large-scale only
     max_parallel: int = 50                 # Large-scale only
+    library_is_remote: bool = False        # True when library_path is already on the HPC
 
     def to_dict(self) -> Dict:
         """Serialize JobParams to a plain dictionary for JSON storage."""
@@ -42,6 +43,7 @@ class JobParams:
             'session_id': self.session_id,
             'pdb_path': self.pdb_path,
             'library_path': self.library_path,
+            'library_is_remote': self.library_is_remote,
             'binding_site_method': self.binding_site_method,
             'ligand_path': self.ligand_path,
             'residue_name': self.residue_name,
@@ -66,6 +68,7 @@ class JobParams:
             session_id=data['session_id'],
             pdb_path=data['pdb_path'],
             library_path=data['library_path'],
+            library_is_remote=data.get('library_is_remote', False),
             binding_site_method=data['binding_site_method'],
             ligand_path=data.get('ligand_path'),
             residue_name=data.get('residue_name'),

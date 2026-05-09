@@ -45,7 +45,7 @@ SLURM_TIME = "04:00:00"
 # File upload limits
 # ---------------------------------------------------------------------------
 
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB
 MAX_CONTENT_LENGTH = MAX_FILE_SIZE
 
 ALLOWED_EXTENSIONS = {

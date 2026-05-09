@@ -21,12 +21,36 @@
 
             <!-- Compound Library File -->
             <div class="mb-3">
-                <label for="library_file" class="form-label">
+                <label class="form-label">
                     Compound Library
                     <i class="bi bi-info-circle tooltip-icon" data-bs-toggle="tooltip"
-                       data-bs-title="Upload the compound library to screen against the receptor. Supported formats: SDF, SMI, SMILES, or TXT."></i>
+                       data-bs-title="Upload a compound library (max 2 GB), or enter the full path to a file already on the HPC (e.g. /nemo/.../enamine_real.sdf). Use the HPC path for large libraries."></i>
                 </label>
-                <input type="file" class="form-control" id="library_file" name="library_file" accept=".sdf,.smi,.smiles,.txt" />
+
+                <!-- Tab switcher -->
+                <div class="btn-group btn-group-sm mb-2" role="group">
+                    <input type="radio" class="btn-check" name="library_source" id="lib-upload-tab" value="upload" checked />
+                    <label class="btn btn-outline-secondary" for="lib-upload-tab">
+                        <i class="bi bi-upload me-1"></i>Upload file
+                    </label>
+                    <input type="radio" class="btn-check" name="library_source" id="lib-hpc-tab" value="hpc" />
+                    <label class="btn btn-outline-secondary" for="lib-hpc-tab">
+                        <i class="bi bi-hdd-network me-1"></i>HPC path
+                    </label>
+                </div>
+
+                <div id="lib-upload-panel">
+                    <input type="file" class="form-control" id="library_file" name="library_file"
+                           accept=".sdf,.smi,.smiles,.txt" />
+                    <div class="form-text">Accepted: .sdf, .smi, .smiles, .txt — max 2 GB</div>
+                </div>
+
+                <div id="lib-hpc-panel" class="d-none">
+                    <input type="text" class="form-control font-monospace" id="library_hpc_path"
+                           name="library_hpc_path"
+                           placeholder="/nemo/stp/chemicalbiology/home/shared/libraries/enamine_real.sdf" />
+                    <div class="form-text">Full absolute path to a library file already on the HPC.</div>
+                </div>
             </div>
 
             <!-- Binding Site Method -->

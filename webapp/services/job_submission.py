@@ -58,12 +58,15 @@ class JobSubmissionService:
             raise SlurmError("scp pdb", None, f"PDB upload failed: {err}")
         remote_paths["pdb_path"] = remote_pdb
 
-        # Library
-        remote_lib = f"{remote_job_dir}/{os.path.basename(params.library_path)}"
-        ok, err = server.upload_file(params.library_path, remote_lib, timeout=600)
-        if not ok:
-            raise SlurmError("scp library", None, f"Library upload failed: {err}")
-        remote_paths["library_path"] = remote_lib
+        # Library — skip upload if it's already on the HPC
+        if params.library_is_remote:
+            remote_paths["library_path"] = params.library_path  # already a remote path
+        else:
+            remote_lib = f"{remote_job_dir}/{os.path.basename(params.library_path)}"
+            ok, err = server.upload_file(params.library_path, remote_lib, timeout=600)
+            if not ok:
+                raise SlurmError("scp library", None, f"Library upload failed: {err}")
+            remote_paths["library_path"] = remote_lib
 
         # Ligand (optional)
         if params.ligand_path:

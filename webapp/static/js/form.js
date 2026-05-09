@@ -119,3 +119,36 @@ function initAutoFillTargetName() {
         }
     });
 }
+
+/* =========================================================================
+   Library Source Toggle (upload vs HPC path)
+   ========================================================================= */
+
+document.addEventListener('DOMContentLoaded', function () {
+    var uploadTab = document.getElementById('lib-upload-tab');
+    var hpcTab    = document.getElementById('lib-hpc-tab');
+    var uploadPanel = document.getElementById('lib-upload-panel');
+    var hpcPanel    = document.getElementById('lib-hpc-panel');
+
+    if (!uploadTab || !hpcTab) return;
+
+    function updateLibraryPanel() {
+        if (hpcTab.checked) {
+            uploadPanel.classList.add('d-none');
+            hpcPanel.classList.remove('d-none');
+            // Clear the file input so it doesn't get submitted
+            var fileInput = document.getElementById('library_file');
+            if (fileInput) fileInput.value = '';
+        } else {
+            hpcPanel.classList.add('d-none');
+            uploadPanel.classList.remove('d-none');
+            // Clear the HPC path input
+            var hpcInput = document.getElementById('library_hpc_path');
+            if (hpcInput) hpcInput.value = '';
+        }
+    }
+
+    uploadTab.addEventListener('change', updateLibraryPanel);
+    hpcTab.addEventListener('change', updateLibraryPanel);
+    updateLibraryPanel(); // set initial state
+});

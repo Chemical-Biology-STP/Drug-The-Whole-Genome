@@ -96,7 +96,7 @@ class FileUploadHandler:
         # exceeds the limit, reject early.
         if file.content_length and file.content_length > MAX_FILE_SIZE:
             raise ValidationError(
-                "File exceeds the maximum allowed size of 500 MB."
+                "File exceeds the maximum allowed size of 2 GB."
             )
 
         # Save the file
@@ -108,7 +108,7 @@ class FileUploadHandler:
         if os.path.getsize(save_path) > MAX_FILE_SIZE:
             os.remove(save_path)
             raise ValidationError(
-                "File exceeds the maximum allowed size of 500 MB."
+                "File exceeds the maximum allowed size of 2 GB."
             )
 
         return save_path

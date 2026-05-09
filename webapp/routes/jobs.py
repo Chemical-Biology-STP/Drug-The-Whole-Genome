@@ -64,19 +64,30 @@ def submit():
             except ValidationError as e:
                 errors.append(str(e))
 
-    # Library file
-    library_file = request.files.get("library_file")
+    # Library file — either upload or HPC path
+    library_hpc_path = request.form.get("library_hpc_path", "").strip()
     library_path: str | None = None
-    if not library_file or not library_file.filename:
-        errors.append("Compound library is required.")
-    else:
-        if not validate_file_extension(library_file.filename, "library"):
-            errors.append("Library must be .sdf, .smi, .smiles, or .txt.")
+    library_is_remote = False
+
+    if library_hpc_path:
+        # User provided a path to a file already on the HPC — validate extension only
+        if not validate_file_extension(library_hpc_path, "library"):
+            errors.append("HPC library path must end in .sdf, .smi, .smiles, or .txt.")
         else:
-            try:
-                library_path = upload_handler.validate_and_save(library_file, email, "library")
-            except ValidationError as e:
-                errors.append(str(e))
+            library_path = library_hpc_path
+            library_is_remote = True
+    else:
+        library_file = request.files.get("library_file")
+        if not library_file or not library_file.filename:
+            errors.append("Compound library is required — either upload a file or enter an HPC path.")
+        else:
+            if not validate_file_extension(library_file.filename, "library"):
+                errors.append("Library must be .sdf, .smi, .smiles, or .txt.")
+            else:
+                try:
+                    library_path = upload_handler.validate_and_save(library_file, email, "library")
+                except ValidationError as e:
+                    errors.append(str(e))
 
     # Binding site
     binding_site_method = request.form.get("binding_site_method", "")
@@ -150,6 +161,7 @@ def submit():
         session_id=email,  # use email as session_id for compatibility
         pdb_path=pdb_path,
         library_path=library_path,
+        library_is_remote=library_is_remote,
         binding_site_method=binding_site_method,
         ligand_path=ligand_path,
         residue_name=residue_name,
