@@ -31,6 +31,9 @@ REMOTE_PROJECT_ROOT = "/nemo/stp/chemicalbiology/home/shared/software/drugclip"
 # Directory on the HPC where per-job directories live
 REMOTE_JOBS_DIR = f"{REMOTE_PROJECT_ROOT}/jobs"
 
+# Shared library store — uploaded libraries are copied here for reuse
+REMOTE_LIBRARIES_DIR = f"{REMOTE_PROJECT_ROOT}/data/libraries"
+
 # ---------------------------------------------------------------------------
 # SLURM settings (standard screening job)
 # ---------------------------------------------------------------------------

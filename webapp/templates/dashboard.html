@@ -33,6 +33,10 @@
                     <label class="btn btn-outline-secondary" for="lib-upload-tab">
                         <i class="bi bi-upload me-1"></i>Upload file
                     </label>
+                    <input type="radio" class="btn-check" name="library_source" id="lib-saved-tab" value="saved" />
+                    <label class="btn btn-outline-secondary" for="lib-saved-tab">
+                        <i class="bi bi-collection me-1"></i>Saved libraries
+                    </label>
                     <input type="radio" class="btn-check" name="library_source" id="lib-hpc-tab" value="hpc" />
                     <label class="btn btn-outline-secondary" for="lib-hpc-tab">
                         <i class="bi bi-hdd-network me-1"></i>HPC path
@@ -72,6 +76,16 @@
                            name="library_hpc_path"
                            placeholder="/nemo/stp/chemicalbiology/home/shared/libraries/enamine_real.sdf" />
                     <div class="form-text">Full absolute path to a library file already on the HPC.</div>
+                </div>
+
+                <!-- Saved libraries panel -->
+                <div id="lib-saved-panel" class="d-none">
+                    <select class="form-select" id="lib-saved-select">
+                        <option value="">Loading saved libraries…</option>
+                    </select>
+                    <div class="form-text">Libraries previously uploaded through this app.</div>
+                    <!-- Hidden field populated when a saved library is selected -->
+                    <input type="hidden" name="library_hpc_path" id="library_saved_path" value="" />
                 </div>
             </div>
 

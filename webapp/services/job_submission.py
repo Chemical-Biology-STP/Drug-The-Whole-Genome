@@ -11,7 +11,7 @@ import subprocess
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from webapp.config import REMOTE_HOST, REMOTE_JOBS_DIR, REMOTE_PROJECT_ROOT, REMOTE_USER
+from webapp.config import REMOTE_HOST, REMOTE_JOBS_DIR, REMOTE_LIBRARIES_DIR, REMOTE_PROJECT_ROOT, REMOTE_USER
 from webapp.modules.remote_server import RemoteServer
 from webapp.services.job_store import JobStore
 from webapp.services.models import JobParams, JobRecord
@@ -62,11 +62,23 @@ class JobSubmissionService:
         if params.library_is_remote:
             remote_paths["library_path"] = params.library_path  # already a remote path
         else:
+            # Upload to the job-specific input dir
             remote_lib = f"{remote_job_dir}/{os.path.basename(params.library_path)}"
             ok, err = server.upload_file(params.library_path, remote_lib, timeout=600)
             if not ok:
                 raise SlurmError("scp library", None, f"Library upload failed: {err}")
             remote_paths["library_path"] = remote_lib
+
+            # Also copy to the shared library store for future reuse (best-effort)
+            lib_filename = os.path.basename(params.library_path)
+            remote_shared_lib = f"{REMOTE_LIBRARIES_DIR}/{lib_filename}"
+            server.run_command(f"mkdir -p {REMOTE_LIBRARIES_DIR}")
+            # Only copy if not already there (avoid re-uploading large files)
+            exists_out, _ = server.run_command(
+                f"test -f {remote_shared_lib} && echo exists"
+            )
+            if (exists_out or "").strip() != "exists":
+                server.run_command(f"cp {remote_lib} {remote_shared_lib}")
 
         # Ligand (optional)
         if params.ligand_path:

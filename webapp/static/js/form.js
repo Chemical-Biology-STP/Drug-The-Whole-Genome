@@ -128,26 +128,81 @@ document.addEventListener('DOMContentLoaded', function () {
     // ── Tab toggle ──────────────────────────────────────────────────────────
     var uploadTab   = document.getElementById('lib-upload-tab');
     var hpcTab      = document.getElementById('lib-hpc-tab');
+    var savedTab    = document.getElementById('lib-saved-tab');
     var uploadPanel = document.getElementById('lib-upload-panel');
     var hpcPanel    = document.getElementById('lib-hpc-panel');
+    var savedPanel  = document.getElementById('lib-saved-panel');
 
     if (!uploadTab || !hpcTab) return;
 
     function updateLibraryPanel() {
+        uploadPanel.classList.add('d-none');
+        hpcPanel.classList.add('d-none');
+        if (savedPanel) savedPanel.classList.add('d-none');
+
+        // Clear all library fields
+        document.getElementById('library_upload_path').value = '';
+        var hpcInput = document.getElementById('library_hpc_path');
+        if (hpcInput) hpcInput.value = '';
+        var savedPath = document.getElementById('library_saved_path');
+        if (savedPath) savedPath.value = '';
+
         if (hpcTab.checked) {
-            uploadPanel.classList.add('d-none');
             hpcPanel.classList.remove('d-none');
-            document.getElementById('library_upload_path').value = '';
+        } else if (savedTab && savedTab.checked) {
+            if (savedPanel) savedPanel.classList.remove('d-none');
+            loadSavedLibraries();
         } else {
-            hpcPanel.classList.add('d-none');
             uploadPanel.classList.remove('d-none');
-            document.getElementById('library_hpc_path').value = '';
         }
     }
 
     uploadTab.addEventListener('change', updateLibraryPanel);
     hpcTab.addEventListener('change', updateLibraryPanel);
+    if (savedTab) savedTab.addEventListener('change', updateLibraryPanel);
     updateLibraryPanel();
+
+    // ── Saved libraries loader ──────────────────────────────────────────────
+    var savedLibrariesLoaded = false;
+
+    function loadSavedLibraries() {
+        if (savedLibrariesLoaded) return;
+        var select = document.getElementById('lib-saved-select');
+        if (!select) return;
+
+        fetch('/api/libraries')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                savedLibrariesLoaded = true;
+                select.innerHTML = '';
+                var libs = data.libraries || [];
+                if (libs.length === 0) {
+                    select.innerHTML = '<option value="">No saved libraries yet — upload one first</option>';
+                    return;
+                }
+                var placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = '— Select a library —';
+                select.appendChild(placeholder);
+                libs.forEach(function(lib) {
+                    var opt = document.createElement('option');
+                    opt.value = lib.path;
+                    opt.textContent = lib.name + '  (' + lib.size + ')';
+                    select.appendChild(opt);
+                });
+            })
+            .catch(function() {
+                select.innerHTML = '<option value="">Could not load libraries — check HPC connection</option>';
+            });
+    }
+
+    var savedSelect = document.getElementById('lib-saved-select');
+    if (savedSelect) {
+        savedSelect.addEventListener('change', function() {
+            var savedPath = document.getElementById('library_saved_path');
+            if (savedPath) savedPath.value = this.value;
+        });
+    }
 
     // ── Chunked uploader ────────────────────────────────────────────────────
     var CHUNK_SIZE = 10 * 1024 * 1024;  // 10 MB per chunk
