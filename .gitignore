@@ -15,6 +15,7 @@ webapp/uploads/*/
 webapp/data/*.db
 webapp/data/*.db-shm
 webapp/data/*.db-wal
+webapp/data/jobs.json
 
 # Hypothesis database
 .hypothesis/examples/
