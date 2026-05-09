@@ -64,14 +64,20 @@ class JobMonitor:
             if not active_jobs:
                 return
 
-            job_ids = [job.job_id for job in active_jobs]
+            # Collect all SLURM IDs to query — for large-scale jobs use child IDs
+            all_slurm_ids: set[str] = set()
+            for job in active_jobs:
+                if job.child_job_ids:
+                    all_slurm_ids.update(job.child_job_ids)
+                else:
+                    all_slurm_ids.add(job.job_id)
 
             # squeue for currently queued/running
-            squeue_results = self._slurm_client.squeue(job_ids=job_ids)
+            squeue_results = self._slurm_client.squeue(job_ids=list(all_slurm_ids))
             squeue_map = {e["job_id"]: e["state"] for e in squeue_results}
 
             # sacct for finished
-            missing_ids = [jid for jid in job_ids if jid not in squeue_map]
+            missing_ids = [jid for jid in all_slurm_ids if jid not in squeue_map]
             sacct_map: dict[str, str] = {}
             if missing_ids:
                 sacct_results = self._slurm_client.sacct(missing_ids)
@@ -79,23 +85,21 @@ class JobMonitor:
                     if "." not in e["job_id"]:
                         sacct_map[e["job_id"]] = e["state"]
 
-            job_record_map = {job.job_id: job for job in active_jobs}
             now = datetime.now(timezone.utc).isoformat()
 
-            for job_id in job_ids:
-                new_status: Optional[str] = None
-                if job_id in squeue_map:
-                    new_status = squeue_map[job_id]
-                elif job_id in sacct_map:
-                    new_status = sacct_map[job_id]
+            for record in active_jobs:
+                if record.child_job_ids:
+                    new_status = self._aggregate_child_status(
+                        record.child_job_ids, squeue_map, sacct_map
+                    )
                 else:
-                    new_status = "FAILED"
-
-                if new_status is None:
-                    continue
-
-                record = job_record_map[job_id]
-                new_status = self._normalize_status(new_status)
+                    jid = record.job_id
+                    if jid in squeue_map:
+                        new_status = self._normalize_status(squeue_map[jid])
+                    elif jid in sacct_map:
+                        new_status = self._normalize_status(sacct_map[jid])
+                    else:
+                        new_status = "FAILED"
 
                 if new_status == record.status:
                     continue
@@ -103,13 +107,11 @@ class JobMonitor:
                 updates: dict = {"status": new_status, "updated_at": now}
 
                 if new_status == "COMPLETED":
-                    # Download results.txt from HPC
                     remote_results = f"{record.job_dir}/results.txt"
-                    local_results = self._download_results(job_id, remote_results)
+                    local_results = self._download_results(record.job_id, remote_results)
                     if local_results:
                         updates["results_path"] = local_results
                     else:
-                        # No results file — treat as failed
                         new_status = "FAILED"
                         updates["status"] = "FAILED"
                         updates["error_message"] = "Job completed but results.txt was not found on the HPC."
@@ -119,16 +121,48 @@ class JobMonitor:
                     if error_msg:
                         updates["error_message"] = error_msg
 
-                self._job_store.update_job(job_id, updates)
+                self._job_store.update_job(record.job_id, updates)
                 logger.info("Job %s: %s -> %s (owner: %s)",
-                            job_id, record.status, new_status, record.email)
+                            record.job_id, record.status, new_status, record.email)
 
-                # Send email notification
                 if new_status in TERMINAL_STATES and record.email:
                     self._send_notification(record, new_status)
 
         except Exception:
             logger.exception("Error in JobMonitor.poll_once()")
+
+    def _aggregate_child_status(
+        self,
+        child_ids: list,
+        squeue_map: dict,
+        sacct_map: dict,
+    ) -> str:
+        """Derive overall job status from a set of child SLURM job IDs.
+
+        Rules (in priority order):
+        - Any child RUNNING/PENDING → RUNNING
+        - Any child FAILED/TIMEOUT/etc → FAILED
+        - All children COMPLETED → COMPLETED
+        - No children found anywhere → RUNNING (still being submitted)
+        """
+        statuses = []
+        for jid in child_ids:
+            if jid in squeue_map:
+                statuses.append(self._normalize_status(squeue_map[jid]))
+            elif jid in sacct_map:
+                statuses.append(self._normalize_status(sacct_map[jid]))
+            # If not found in either, it may not be submitted yet — ignore
+
+        if not statuses:
+            return "RUNNING"  # children not in SLURM yet
+
+        if any(s in ("PENDING", "RUNNING") for s in statuses):
+            return "RUNNING"
+        if any(s in ("FAILED", "TIMEOUT", "CANCELLED") for s in statuses):
+            return "FAILED"
+        if all(s == "COMPLETED" for s in statuses):
+            return "COMPLETED"
+        return "RUNNING"
 
     def _download_results(self, job_id: str, remote_results: str) -> Optional[str]:
         """Download results.txt from the HPC to a local cache path."""
