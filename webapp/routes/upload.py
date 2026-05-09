@@ -114,16 +114,27 @@ def receive_chunk():
     done = received >= total_chunks
 
     if done:
-        # Assemble all chunks into the final file
+        # Assemble all chunks into the final file using cat for speed
         upload_dir = os.path.join(UPLOAD_FOLDER, email)
         os.makedirs(upload_dir, exist_ok=True)
         final = _final_path(email, upload_id, filename)
 
-        with open(final, "wb") as out:
-            for i in range(total_chunks):
-                cp = os.path.join(cdir, f"chunk_{i:06d}")
-                with open(cp, "rb") as inp:
-                    out.write(inp.read())
+        # Build sorted list of chunk paths
+        chunk_paths = [
+            os.path.join(cdir, f"chunk_{i:06d}")
+            for i in range(total_chunks)
+        ]
+
+        # Use shell cat for fast concatenation (avoids Python read/write overhead)
+        import subprocess
+        with open(final, "wb") as out_f:
+            proc = subprocess.run(
+                ["cat"] + chunk_paths,
+                stdout=out_f,
+                stderr=subprocess.PIPE,
+            )
+        if proc.returncode != 0:
+            return jsonify({"error": "Assembly failed: " + proc.stderr.decode()}), 500
 
         # Clean up chunks
         shutil.rmtree(cdir, ignore_errors=True)

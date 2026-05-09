@@ -356,9 +356,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 var pct = Math.round((uploadedChunks / totalChunks) * 100);
                 progressBar.style.width = pct + '%';
                 progressPct.textContent = pct + '%';
-                statusLabel.textContent = 'Uploading ' + file.name + ' — ' +
-                    formatBytes(Math.min(uploadedChunks * CHUNK_SIZE, file.size)) +
-                    ' / ' + formatBytes(file.size);
+
+                if (uploadedChunks >= totalChunks) {
+                    // All chunks sent — waiting for server to finish assembling
+                    statusLabel.textContent = '⏳ Assembling ' + file.name + ' on server…';
+                } else {
+                    statusLabel.textContent = 'Uploading ' + file.name + ' — ' +
+                        formatBytes(Math.min(uploadedChunks * CHUNK_SIZE, file.size)) +
+                        ' / ' + formatBytes(file.size);
+                }
 
                 if (data.done) {
                     uploadPathField.value = data.path;
@@ -369,6 +375,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     statusLabel.textContent = '✓ ' + file.name + ' ready (' + formatBytes(file.size) + ')';
                     cancelBtn.classList.add('d-none');
                     setSubmitEnabled(true);
+                    // Invalidate saved libraries cache so the new file appears
+                    savedLibrariesLoaded = false;
                 }
             });
         }
