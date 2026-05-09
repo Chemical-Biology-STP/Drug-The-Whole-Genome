@@ -48,12 +48,24 @@ def _meta_path(chunk_dir: str) -> str:
     return os.path.join(chunk_dir, "_meta.json")
 
 def _load_meta(chunk_dir: str) -> dict:
-    with open(_meta_path(chunk_dir)) as f:
-        return json.load(f)
+    try:
+        with open(_meta_path(chunk_dir)) as f:
+            content = f.read().strip()
+            if not content:
+                return {}
+            return json.loads(content)
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 def _save_meta(chunk_dir: str, meta: dict) -> None:
-    with open(_meta_path(chunk_dir), "w") as f:
+    # Atomic write via temp file to prevent race conditions with parallel chunks
+    path = _meta_path(chunk_dir)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(meta, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
 @upload_bp.route("/library", methods=["POST"])
@@ -86,31 +98,35 @@ def receive_chunk():
     if len(chunk_data) > MAX_CHUNK_SIZE:
         return jsonify({"error": "Chunk exceeds 50 MB limit"}), 413
 
-    # Create chunk directory and meta on first chunk
+    # Create chunk directory
     cdir = _chunk_dir(email, upload_id)
     os.makedirs(cdir, exist_ok=True)
 
-    meta_file = _meta_path(cdir)
-    if not os.path.exists(meta_file):
-        _save_meta(cdir, {
-            "upload_id": upload_id,
-            "filename": filename,
-            "total_chunks": total_chunks,
-            "received_chunks": [],
-        })
-
-    meta = _load_meta(cdir)
-
-    # Write this chunk
+    # Write this chunk first (independent of meta)
     chunk_path = os.path.join(cdir, f"chunk_{chunk_index:06d}")
     with open(chunk_path, "wb") as f:
         f.write(chunk_data)
 
-    if chunk_index not in meta["received_chunks"]:
-        meta["received_chunks"].append(chunk_index)
-    _save_meta(cdir, meta)
-
-    received = len(meta["received_chunks"])
+    # Update meta with file lock to prevent race conditions from parallel chunks
+    import fcntl
+    lock_path = os.path.join(cdir, "_meta.lock")
+    with open(lock_path, "w") as lock_f:
+        fcntl.flock(lock_f, fcntl.LOCK_EX)
+        try:
+            meta = _load_meta(cdir)
+            if not meta:
+                meta = {
+                    "upload_id": upload_id,
+                    "filename": filename,
+                    "total_chunks": total_chunks,
+                    "received_chunks": [],
+                }
+            if chunk_index not in meta["received_chunks"]:
+                meta["received_chunks"].append(chunk_index)
+            _save_meta(cdir, meta)
+            received = len(meta["received_chunks"])
+        finally:
+            fcntl.flock(lock_f, fcntl.LOCK_UN)
     done = received >= total_chunks
 
     if done:

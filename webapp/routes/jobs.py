@@ -195,7 +195,18 @@ def submit():
         else:
             record = service.submit_standard(params, email)
     except SlurmError as e:
-        flash(f"Job submission failed: {e.stderr}", "danger")
+        import logging
+        logging.getLogger(__name__).error(
+            "Job submission failed — command: %s | stderr: %s", e.command, e.stderr
+        )
+        flash(f"Job submission failed: {e.stderr or e.command or 'unknown SLURM error'}", "danger")
+        return redirect(url_for("dashboard.index"))
+    except Exception as e:
+        import logging, traceback
+        logging.getLogger(__name__).error(
+            "Job submission unexpected error: %s\n%s", e, traceback.format_exc()
+        )
+        flash(f"Job submission failed: {e}", "danger")
         return redirect(url_for("dashboard.index"))
 
     flash(f"Job submitted! SLURM Job ID: {record.job_id}", "success")
