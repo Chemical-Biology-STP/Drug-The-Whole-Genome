@@ -1,6 +1,6 @@
 **/__pycache__/
 **/**/__pycache__/
-data
+/data
 **/py_scripts
 *.txt
 test*
@@ -10,6 +10,11 @@ webapp/flask_session/
 
 # Uploaded files (runtime data)
 webapp/uploads/*/
+
+# Runtime data (user DB, job store)
+webapp/data/*.db
+webapp/data/*.db-shm
+webapp/data/*.db-wal
 
 # Hypothesis database
 .hypothesis/examples/
