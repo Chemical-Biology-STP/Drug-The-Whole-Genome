@@ -1,8 +1,8 @@
 """
 Results parsing and pagination for the DrugCLIP web application.
 
-Provides utilities to parse screening results files (CSV format with
-SMILES,score lines) and paginate result lists for the web UI.
+Results are downloaded from the HPC by the JobMonitor when a job completes.
+The results_path stored on the JobRecord points to the local cached copy.
 """
 
 import math

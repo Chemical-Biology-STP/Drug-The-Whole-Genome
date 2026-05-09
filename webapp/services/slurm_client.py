@@ -1,24 +1,20 @@
-"""Low-level wrapper around SLURM CLI commands.
+"""Low-level wrapper around SLURM CLI commands — SSH edition.
 
-All subprocess calls to sbatch, squeue, sacct, and scancel are centralized
-here. Raises SlurmError on failures.
+All sbatch/squeue/sacct/scancel calls are routed through SSH to the HPC
+login node via RemoteServer, matching the app_ProtPrep pattern.
 """
 
 from __future__ import annotations
 
 import re
-import subprocess
 from typing import Dict, List, Optional
+
+from webapp.config import REMOTE_HOST, REMOTE_USER
+from webapp.modules.remote_server import RemoteServer
 
 
 class SlurmError(Exception):
-    """Raised when a SLURM command fails.
-
-    Attributes:
-        command: The command that was executed.
-        return_code: The process return code (None if timed out).
-        stderr: The stderr output from the command.
-    """
+    """Raised when a SLURM command fails."""
 
     def __init__(self, command: str, return_code: Optional[int], stderr: str):
         self.command = command
@@ -31,180 +27,95 @@ class SlurmError(Exception):
 
 
 class SlurmClient:
-    """Low-level wrapper around SLURM CLI commands."""
+    """Routes SLURM commands to the HPC via SSH."""
 
-    def _run(self, cmd: List[str], timeout: int = 30) -> subprocess.CompletedProcess:
-        """Execute a command via subprocess with capture, timeout, and error handling.
+    def _server(self) -> RemoteServer:
+        return RemoteServer(REMOTE_HOST, REMOTE_USER)
 
-        Args:
-            cmd: Command and arguments as a list of strings.
-            timeout: Maximum seconds to wait for the command to complete.
-
-        Returns:
-            The CompletedProcess result on success.
-
-        Raises:
-            SlurmError: If the command returns non-zero or times out.
-        """
-        cmd_str = " ".join(cmd)
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired:
-            raise SlurmError(
-                command=cmd_str,
-                return_code=None,
-                stderr=f"Command timed out after {timeout} seconds",
-            )
-
-        if result.returncode != 0:
-            raise SlurmError(
-                command=cmd_str,
-                return_code=result.returncode,
-                stderr=result.stderr.strip(),
-            )
-
-        return result
+    def _run(self, cmd_str: str, timeout: int = 60) -> str:
+        """Run *cmd_str* on the HPC via SSH. Returns stdout or raises SlurmError."""
+        out, err = self._server().run_command(cmd_str, timeout=timeout)
+        if out is None:
+            raise SlurmError(command=cmd_str, return_code=None, stderr=err or "")
+        return out
 
     def sbatch(self, script_path: str, script_args: Optional[List[str]] = None) -> str:
-        """Submit a job via sbatch.
-
-        Args:
-            script_path: Path to the SLURM batch script.
-            script_args: Optional arguments to pass to the script.
-
-        Returns:
-            The SLURM job ID string parsed from sbatch stdout.
-
-        Raises:
-            SlurmError: If sbatch fails or the output cannot be parsed.
-        """
-        cmd = ["sbatch", script_path]
-        if script_args:
-            cmd.extend(script_args)
-
-        result = self._run(cmd)
-
-        # sbatch outputs: "Submitted batch job 12345"
-        match = re.search(r"Submitted batch job (\d+)", result.stdout)
+        """Submit a job via sbatch on the HPC. Returns the SLURM job ID."""
+        args_str = " ".join(script_args) if script_args else ""
+        cmd = f"sbatch {script_path} {args_str}".strip()
+        out = self._run(cmd)
+        match = re.search(r"Submitted batch job (\d+)", out)
         if not match:
-            raise SlurmError(
-                command=" ".join(cmd),
-                return_code=0,
-                stderr=f"Could not parse job ID from sbatch output: {result.stdout!r}",
-            )
-
+            raise SlurmError(command=cmd, return_code=0,
+                             stderr=f"Could not parse job ID from sbatch output: {out!r}")
         return match.group(1)
 
-    def squeue(
-        self,
-        job_ids: Optional[List[str]] = None,
-        user: Optional[str] = None,
-    ) -> List[Dict[str, str]]:
-        """Query job status via squeue.
-
-        Args:
-            job_ids: Optional list of job IDs to query.
-            user: Optional username to filter by.
-
-        Returns:
-            List of dicts with keys: job_id, state, name, time, partition, nodelist.
-        """
-        cmd = [
-            "squeue",
-            "--noheader",
-            "--format=%i|%T|%j|%M|%P|%N",
-        ]
+    def squeue(self, job_ids: Optional[List[str]] = None,
+               user: Optional[str] = None) -> List[Dict[str, str]]:
+        """Query job status via squeue on the HPC."""
+        cmd = "squeue --noheader --format='%i|%T|%j|%M|%P|%N'"
         if job_ids:
-            cmd.extend(["--jobs", ",".join(job_ids)])
+            cmd += f" --jobs={','.join(job_ids)}"
         if user:
-            cmd.extend(["--user", user])
-
-        result = self._run(cmd)
-
+            cmd += f" --user={user}"
+        try:
+            out = self._run(cmd)
+        except SlurmError:
+            return []
         jobs = []
-        for line in result.stdout.strip().splitlines():
+        for line in out.splitlines():
             line = line.strip()
             if not line:
                 continue
             parts = line.split("|")
             if len(parts) >= 6:
                 jobs.append({
-                    "job_id": parts[0].strip(),
-                    "state": parts[1].strip(),
-                    "name": parts[2].strip(),
-                    "time": parts[3].strip(),
+                    "job_id":    parts[0].strip(),
+                    "state":     parts[1].strip(),
+                    "name":      parts[2].strip(),
+                    "time":      parts[3].strip(),
                     "partition": parts[4].strip(),
-                    "nodelist": parts[5].strip(),
+                    "nodelist":  parts[5].strip(),
                 })
-
         return jobs
 
     def sacct(self, job_ids: List[str]) -> List[Dict[str, str]]:
-        """Query completed job info via sacct.
-
-        Args:
-            job_ids: List of job IDs to query.
-
-        Returns:
-            List of dicts with keys: job_id, state, exit_code, elapsed, start, end.
-        """
-        cmd = [
-            "sacct",
-            "--noheader",
-            "--parsable2",
-            "--format=JobID,State,ExitCode,Elapsed,Start,End",
-            "--jobs=" + ",".join(job_ids),
-        ]
-
-        result = self._run(cmd)
-
+        """Query completed job info via sacct on the HPC."""
+        ids_str = ",".join(job_ids)
+        cmd = (
+            f"sacct --noheader --parsable2 "
+            f"--format=JobID,State,ExitCode,Elapsed,Start,End "
+            f"--jobs={ids_str}"
+        )
+        try:
+            out = self._run(cmd)
+        except SlurmError:
+            return []
         jobs = []
-        for line in result.stdout.strip().splitlines():
+        for line in out.splitlines():
             line = line.strip()
             if not line:
                 continue
             parts = line.split("|")
             if len(parts) >= 6:
                 jobs.append({
-                    "job_id": parts[0].strip(),
-                    "state": parts[1].strip(),
+                    "job_id":    parts[0].strip(),
+                    "state":     parts[1].strip(),
                     "exit_code": parts[2].strip(),
-                    "elapsed": parts[3].strip(),
-                    "start": parts[4].strip(),
-                    "end": parts[5].strip(),
+                    "elapsed":   parts[3].strip(),
+                    "start":     parts[4].strip(),
+                    "end":       parts[5].strip(),
                 })
-
         return jobs
 
     def scancel(self, job_id: str) -> None:
-        """Cancel a SLURM job.
-
-        Args:
-            job_id: The SLURM job ID to cancel.
-
-        Raises:
-            SlurmError: If scancel fails.
-        """
-        self._run(["scancel", job_id])
+        """Cancel a SLURM job on the HPC."""
+        self._run(f"scancel {job_id}")
 
     def is_available(self) -> bool:
-        """Check if SLURM commands are accessible.
-
-        Returns:
-            True if squeue can be executed, False otherwise.
-        """
+        """Check if SLURM is reachable on the HPC."""
         try:
-            subprocess.run(
-                ["squeue", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            self._run("squeue --version", timeout=10)
             return True
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        except Exception:
             return False

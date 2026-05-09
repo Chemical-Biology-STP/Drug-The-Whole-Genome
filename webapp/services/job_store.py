@@ -158,26 +158,31 @@ class JobStore:
         return None
 
     def get_jobs_for_session(self, session_id: str) -> List[JobRecord]:
-        """Retrieve all jobs belonging to a session, newest first.
-
-        Parameters
-        ----------
-        session_id:
-            The session identifier to filter by.
-
-        Returns
-        -------
-        list[JobRecord]
-            Job records matching the session, sorted by ``submitted_at``
-            descending (newest first).
-        """
+        """Retrieve all jobs belonging to a session, newest first."""
         data = self._read()
         jobs = [
             JobRecord.from_dict(job)
             for job in data["jobs"]
             if job["session_id"] == session_id
         ]
-        # Sort by submitted_at descending (newest first)
+        jobs.sort(key=lambda r: r.submitted_at, reverse=True)
+        return jobs
+
+    def get_jobs_for_user(self, email: str) -> List[JobRecord]:
+        """Retrieve all jobs belonging to a user email, newest first."""
+        data = self._read()
+        jobs = [
+            JobRecord.from_dict(job)
+            for job in data["jobs"]
+            if job.get("email") == email
+        ]
+        jobs.sort(key=lambda r: r.submitted_at, reverse=True)
+        return jobs
+
+    def get_all_jobs(self) -> List[JobRecord]:
+        """Retrieve all jobs across all users, newest first."""
+        data = self._read()
+        jobs = [JobRecord.from_dict(job) for job in data["jobs"]]
         jobs.sort(key=lambda r: r.submitted_at, reverse=True)
         return jobs
 

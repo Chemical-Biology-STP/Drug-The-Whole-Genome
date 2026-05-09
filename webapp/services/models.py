@@ -86,31 +86,29 @@ class JobParams:
 
 @dataclass
 class JobRecord:
-    """Persistent metadata for a submitted SLURM job.
+    """Persistent metadata for a submitted SLURM job."""
 
-    Stored in webapp/data/jobs.json and updated as the job progresses.
-    """
-
-    job_id: str                            # Primary SLURM job ID
-    session_id: str                        # Owning session
-    target_name: str                       # e.g., "6QTP"
-    library_name: str                      # e.g., "enamine_dds10"
-    screening_mode: str                    # 'standard' | 'large_scale'
-    status: str                            # PENDING | RUNNING | COMPLETED | FAILED | CANCELLED | TIMEOUT
-    submitted_at: str                      # ISO 8601 timestamp
-    updated_at: str                        # ISO 8601 timestamp
-    params: Dict                           # Full JobParams as dict for display
-    job_dir: str                           # e.g., "jobs/6QTP_vs_enamine_dds10"
-    log_path: Optional[str] = None         # Path to SLURM log file
-    results_path: Optional[str] = None     # Path to results.txt (set on COMPLETED)
-    error_message: Optional[str] = None    # Set on FAILED/TIMEOUT
-    child_job_ids: Optional[List[str]] = None  # Large-scale: array job IDs for stages 3-5
+    job_id: str
+    session_id: str
+    email: str                             # Owner's email address
+    target_name: str
+    library_name: str
+    screening_mode: str
+    status: str
+    submitted_at: str
+    updated_at: str
+    params: Dict
+    job_dir: str
+    log_path: Optional[str] = None
+    results_path: Optional[str] = None
+    error_message: Optional[str] = None
+    child_job_ids: Optional[List[str]] = None
 
     def to_dict(self) -> Dict:
-        """Serialize JobRecord to a plain dictionary for JSON storage."""
         return {
             'job_id': self.job_id,
             'session_id': self.session_id,
+            'email': self.email,
             'target_name': self.target_name,
             'library_name': self.library_name,
             'screening_mode': self.screening_mode,
@@ -127,10 +125,10 @@ class JobRecord:
 
     @classmethod
     def from_dict(cls, data: Dict) -> 'JobRecord':
-        """Deserialize a JobRecord instance from a plain dictionary."""
         return cls(
             job_id=data['job_id'],
             session_id=data['session_id'],
+            email=data.get('email', ''),
             target_name=data['target_name'],
             library_name=data['library_name'],
             screening_mode=data['screening_mode'],

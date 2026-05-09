@@ -1,8 +1,7 @@
-"""Background job monitor that polls SLURM for status updates.
+"""Background job status poller for DrugCLIP (SSH/HPC edition).
 
-Runs a daemon thread that periodically queries squeue/sacct for active jobs
-and updates the job store accordingly. Designed to never crash — all errors
-in poll_once() are caught and logged.
+Polls SLURM via SSH every POLL_INTERVAL seconds, updates the job store,
+downloads results on COMPLETED, and emails the job owner.
 """
 
 from __future__ import annotations
@@ -13,36 +12,24 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional
 
+from webapp.config import APP_BASE_URL, REMOTE_HOST, REMOTE_JOBS_DIR, REMOTE_USER
+from webapp.modules.remote_server import RemoteServer
 from webapp.services.job_store import JobStore
 from webapp.services.slurm_client import SlurmClient
 
 logger = logging.getLogger(__name__)
 
+TERMINAL_STATES = frozenset({
+    "COMPLETED", "FAILED", "CANCELLED", "TIMEOUT",
+    "OUT_OF_MEMORY", "PREEMPTED", "NODE_FAIL",
+})
+
 
 class JobMonitor:
-    """Background SLURM job status poller.
+    """Background SLURM job status poller."""
 
-    Periodically queries SLURM for the status of all active (PENDING/RUNNING)
-    jobs and updates the job store with the latest state. On completion, sets
-    the results_path; on failure/timeout, captures the last 50 lines of the
-    log file as an error message.
-
-    Parameters
-    ----------
-    slurm_client:
-        The SlurmClient instance used to query squeue/sacct.
-    job_store:
-        The JobStore instance used to read/write job records.
-    poll_interval:
-        How often (in seconds) to poll SLURM. Default is 30.
-    """
-
-    def __init__(
-        self,
-        slurm_client: SlurmClient,
-        job_store: JobStore,
-        poll_interval: int = 30,
-    ) -> None:
+    def __init__(self, slurm_client: SlurmClient, job_store: JobStore,
+                 poll_interval: int = 120) -> None:
         self._slurm_client = slurm_client
         self._job_store = job_store
         self._poll_interval = poll_interval
@@ -50,59 +37,28 @@ class JobMonitor:
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
-        """Start the background polling thread.
-
-        Launches a daemon thread that runs _poll_loop(). If the monitor is
-        already running, this is a no-op.
-        """
         if self._thread is not None and self._thread.is_alive():
             return
-
         self._stop_event.clear()
         self._thread = threading.Thread(
-            target=self._poll_loop,
-            name="job-monitor",
-            daemon=True,
+            target=self._poll_loop, name="drugclip-job-monitor", daemon=True,
         )
         self._thread.start()
-        logger.info("JobMonitor started (poll_interval=%ds)", self._poll_interval)
+        logger.info("DrugCLIP JobMonitor started (poll_interval=%ds)", self._poll_interval)
 
     def stop(self) -> None:
-        """Stop the background polling thread.
-
-        Sets the stop event and waits for the thread to finish. Safe to call
-        even if the monitor is not running.
-        """
         self._stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=self._poll_interval + 5)
             self._thread = None
-        logger.info("JobMonitor stopped")
 
     def _poll_loop(self) -> None:
-        """Main loop for the background thread.
-
-        Calls poll_once() at the configured interval, breaking when the stop
-        event is set.
-        """
         while not self._stop_event.is_set():
             self.poll_once()
-            # Wait for the poll interval, but break early if stop is signaled
             self._stop_event.wait(timeout=self._poll_interval)
 
     def poll_once(self) -> None:
-        """Poll SLURM for all active jobs and update the job store.
-
-        Steps:
-        1. Fetch active jobs (PENDING or RUNNING) from the store.
-        2. Query squeue for those job IDs to get current state.
-        3. For jobs not found in squeue, query sacct for final status.
-        4. Update job statuses in the store.
-        5. Set results_path on COMPLETED jobs.
-        6. Set error_message on FAILED/TIMEOUT jobs (last 50 lines of log).
-
-        All exceptions are caught and logged so the thread never crashes.
-        """
+        """Poll SLURM for all active jobs and update the store."""
         try:
             active_jobs = self._job_store.get_active_jobs()
             if not active_jobs:
@@ -110,110 +66,140 @@ class JobMonitor:
 
             job_ids = [job.job_id for job in active_jobs]
 
-            # Query squeue for currently queued/running jobs
+            # squeue for currently queued/running
             squeue_results = self._slurm_client.squeue(job_ids=job_ids)
-            squeue_map = {entry["job_id"]: entry["state"] for entry in squeue_results}
+            squeue_map = {e["job_id"]: e["state"] for e in squeue_results}
 
-            # Identify jobs not found in squeue (likely finished)
+            # sacct for finished
             missing_ids = [jid for jid in job_ids if jid not in squeue_map]
-
-            # Query sacct for finished jobs
             sacct_map: dict[str, str] = {}
             if missing_ids:
                 sacct_results = self._slurm_client.sacct(missing_ids)
-                for entry in sacct_results:
-                    # sacct may return sub-job entries (e.g., "12345.batch")
-                    # We only care about the main job entry
-                    raw_id = entry["job_id"]
-                    if "." not in raw_id:
-                        sacct_map[raw_id] = entry["state"]
+                for e in sacct_results:
+                    if "." not in e["job_id"]:
+                        sacct_map[e["job_id"]] = e["state"]
 
-            # Build a lookup from job_id to JobRecord for convenience
             job_record_map = {job.job_id: job for job in active_jobs}
-
             now = datetime.now(timezone.utc).isoformat()
 
-            # Update each job based on squeue or sacct results
             for job_id in job_ids:
                 new_status: Optional[str] = None
-
                 if job_id in squeue_map:
                     new_status = squeue_map[job_id]
                 elif job_id in sacct_map:
                     new_status = sacct_map[job_id]
                 else:
-                    # Job not found in squeue or sacct — mark as FAILED
                     new_status = "FAILED"
 
                 if new_status is None:
                     continue
 
                 record = job_record_map[job_id]
-
-                # Normalize SLURM state names
                 new_status = self._normalize_status(new_status)
 
-                # Skip if status hasn't changed
                 if new_status == record.status:
                     continue
 
-                updates: dict = {
-                    "status": new_status,
-                    "updated_at": now,
-                }
+                updates: dict = {"status": new_status, "updated_at": now}
 
                 if new_status == "COMPLETED":
-                    # Set results_path to <job_dir>/results.txt
-                    updates["results_path"] = os.path.join(
-                        record.job_dir, "results.txt"
-                    )
+                    # Download results.txt from HPC
+                    remote_results = f"{record.job_dir}/results.txt"
+                    local_results = self._download_results(job_id, remote_results)
+                    if local_results:
+                        updates["results_path"] = local_results
+                    else:
+                        # No results file — treat as failed
+                        new_status = "FAILED"
+                        updates["status"] = "FAILED"
+                        updates["error_message"] = "Job completed but results.txt was not found on the HPC."
 
                 elif new_status in ("FAILED", "TIMEOUT"):
-                    # Try to read last 50 lines of the log file
-                    error_msg = self._read_log_tail(record.log_path)
+                    error_msg = self._fetch_log_tail(record.log_path)
                     if error_msg:
                         updates["error_message"] = error_msg
 
                 self._job_store.update_job(job_id, updates)
-                logger.info(
-                    "Job %s status updated: %s -> %s",
-                    job_id,
-                    record.status,
-                    new_status,
-                )
+                logger.info("Job %s: %s -> %s (owner: %s)",
+                            job_id, record.status, new_status, record.email)
+
+                # Send email notification
+                if new_status in TERMINAL_STATES and record.email:
+                    self._send_notification(record, new_status)
 
         except Exception:
-            # Never let the polling thread crash
             logger.exception("Error in JobMonitor.poll_once()")
 
-    def get_job_status(self, job_id: str) -> Optional[str]:
-        """Get the current status of a specific job from the store.
+    def _download_results(self, job_id: str, remote_results: str) -> Optional[str]:
+        """Download results.txt from the HPC to a local cache path."""
+        import tempfile
+        local_dir = os.path.join(tempfile.gettempdir(), "drugclip_results", job_id)
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, "results.txt")
+        server = RemoteServer(REMOTE_HOST, REMOTE_USER)
+        ok, err = server.download_file(remote_results, local_path)
+        if ok:
+            return local_path
+        logger.warning("Could not download results for job %s: %s", job_id, err)
+        return None
 
-        Parameters
-        ----------
-        job_id:
-            The SLURM job ID to look up.
-
-        Returns
-        -------
-        str or None
-            The current status string, or None if the job is not found.
-        """
-        record = self._job_store.get_job(job_id)
-        if record is None:
+    def _fetch_log_tail(self, log_path: Optional[str], lines: int = 50) -> Optional[str]:
+        """Fetch the last N lines of the SLURM log from the HPC."""
+        if not log_path:
             return None
-        return record.status
+        server = RemoteServer(REMOTE_HOST, REMOTE_USER)
+        out, _ = server.run_command(f"tail -n {lines} {log_path} 2>/dev/null")
+        return out or None
+
+    def _send_notification(self, record, status: str) -> None:
+        """Send a completion/failure email to the job owner."""
+        from webapp.modules.auth import send_email_via_hpc
+        target = record.target_name
+        library = record.library_name
+        label = f"{target} vs {library}"
+
+        if status == "COMPLETED":
+            subject = f"[DrugCLIP] Screening complete: {label}"
+            body = (
+                f"Your DrugCLIP virtual screening job has completed.\n\n"
+                f"Target:  {target}\n"
+                f"Library: {library}\n"
+                f"Job ID:  {record.job_id}\n\n"
+                f"View results at:\n"
+                f"{APP_BASE_URL}/jobs/{record.job_id}/results\n\n"
+                f"— DrugCLIP Virtual Screening"
+            )
+        elif status == "CANCELLED":
+            subject = f"[DrugCLIP] Job cancelled: {label}"
+            body = (
+                f"Your DrugCLIP job was cancelled.\n\n"
+                f"Target:  {target}\n"
+                f"Library: {library}\n"
+                f"Job ID:  {record.job_id}\n\n"
+                f"— DrugCLIP Virtual Screening"
+            )
+        else:
+            subject = f"[DrugCLIP] Job failed: {label}"
+            body = (
+                f"Your DrugCLIP virtual screening job has failed.\n\n"
+                f"Target:  {target}\n"
+                f"Library: {library}\n"
+                f"Job ID:  {record.job_id}\n"
+                f"Status:  {status}\n\n"
+                f"View details at:\n"
+                f"{APP_BASE_URL}/jobs/{record.job_id}\n\n"
+                f"If the problem persists, contact yewmun.yip@crick.ac.uk\n\n"
+                f"— DrugCLIP Virtual Screening"
+            )
+        try:
+            send_email_via_hpc(record.email, subject, body)
+            logger.info("Sent %s email to %s for job %s", status, record.email, record.job_id)
+        except Exception as exc:
+            logger.warning("Failed to send email to %s: %s", record.email, exc)
 
     @staticmethod
     def _normalize_status(slurm_state: str) -> str:
-        """Normalize a SLURM state string to one of our recognized statuses.
-
-        SLURM can report states like COMPLETING, CANCELLED+, etc. We map
-        them to our canonical set: PENDING, RUNNING, COMPLETED, FAILED,
-        CANCELLED, TIMEOUT.
-        """
         state = slurm_state.upper().rstrip("+")
-
         if state in ("PENDING", "CONFIGURING", "REQUEUED"):
             return "PENDING"
         elif state in ("RUNNING", "COMPLETING"):
@@ -222,38 +208,12 @@ class JobMonitor:
             return "COMPLETED"
         elif state in ("FAILED", "NODE_FAIL", "PREEMPTED", "OUT_OF_MEMORY"):
             return "FAILED"
-        elif state in ("CANCELLED",):
+        elif state == "CANCELLED":
             return "CANCELLED"
         elif state in ("TIMEOUT", "DEADLINE"):
             return "TIMEOUT"
-        else:
-            # Unknown state — treat as FAILED to be safe
-            return "FAILED"
+        return "FAILED"
 
-    @staticmethod
-    def _read_log_tail(log_path: Optional[str], lines: int = 50) -> Optional[str]:
-        """Read the last N lines of a log file.
-
-        Parameters
-        ----------
-        log_path:
-            Path to the SLURM log file. If None or the file doesn't exist,
-            returns None.
-        lines:
-            Number of lines to read from the end. Default is 50.
-
-        Returns
-        -------
-        str or None
-            The last N lines of the log file, or None if unavailable.
-        """
-        if not log_path or not os.path.isfile(log_path):
-            return None
-
-        try:
-            with open(log_path, "r") as f:
-                all_lines = f.readlines()
-                tail = all_lines[-lines:]
-                return "".join(tail)
-        except (OSError, IOError):
-            return None
+    def get_job_status(self, job_id: str) -> Optional[str]:
+        record = self._job_store.get_job(job_id)
+        return record.status if record else None
