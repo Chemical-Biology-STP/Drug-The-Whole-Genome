@@ -66,6 +66,7 @@ usage() {
     echo "  --partition <name>     SLURM partition (default: ga100)"
     echo "  --max-parallel <int>   Max parallel jobs (default: 50)"
     echo "  --jobs-dir <path>      Jobs directory (default: jobs/)"
+    echo "  --top-fraction <float> Fraction of library to return (default: 0.02)"
     exit 1
 }
 
@@ -88,6 +89,7 @@ CHUNK_SIZE=1000000
 PARTITION="ga100"
 MAX_PARALLEL=50
 JOBS_DIR="jobs"
+TOP_FRACTION="0.02"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -120,6 +122,8 @@ while [ $# -gt 0 ]; do
             MAX_PARALLEL="$2"; shift 2 ;;
         --jobs-dir)
             JOBS_DIR="$2"; shift 2 ;;
+        --top-fraction)
+            TOP_FRACTION="$2"; shift 2 ;;
         *)
             echo "Unknown option: $1"; usage ;;
     esac
@@ -353,7 +357,7 @@ pixi run python utils/screen_streaming.py \\
     --pocket-lmdb "${POCKET_LMDB}" \\
     --output "${SAVE_PATH}" \\
     --fold-version 6_folds \\
-    --top-fraction 0.02
+    --top-fraction ${TOP_FRACTION}
 
 echo ""
 echo "============================================"
