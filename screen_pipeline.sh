@@ -189,7 +189,7 @@ echo "  Pocket: $POCKET_LMDB"
 echo "  Library: $MOL_LMDB"
 echo "  Output: $SAVE_PATH"
 
-python ./unimol/retrieval.py --user-dir ./unimol $data_path "./dict" --valid-subset test \
+python ./unimol/retrieval.py --user-dir ./unimol "./dict" --valid-subset test \
        --num-workers 8 --ddp-backend=c10d --batch-size 4 \
        --task drugclip --loss in_batch_softmax --arch drugclip \
        --max-pocket-atoms 511 \
