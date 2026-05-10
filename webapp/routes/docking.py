@@ -575,56 +575,53 @@ def restart(docking_id: str):
     if not _owns(original, email):
         abort(403)
 
-    # Get the parent screening record for receptor path etc.
+    # Get the parent screening record
     job_store = _get_job_store()
     screening_record = job_store.get_job(original.screening_job_id)
     if screening_record is None:
         flash("Parent screening job not found.", "danger")
         return redirect(url_for("docking.detail", docking_id=docking_id))
 
-    # Get the compound list — try PDBQT first, fall back to SMI file
+    # Get compounds from the screening results (most reliable source)
+    if not screening_record.results_path or not os.path.exists(screening_record.results_path):
+        flash("Screening results file not available. Cannot restart docking.", "danger")
+        return redirect(url_for("docking.detail", docking_id=docking_id))
+
+    from webapp.services.results_parser import parse_results
+    all_results = parse_results(screening_record.results_path)
+
+    # We need to know which ranks were originally selected.
+    # Try to read from the SMI file on the HPC (most reliable — has rank_N names)
     server = _server()
-    remote_pdbqt = f"{original.job_dir}/ligands_input.pdbqt"
     remote_smi = f"{original.job_dir}/ligands.smi"
-    local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking_restart", docking_id)
+    local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking_restart",
+                             f"{docking_id}_{os.urandom(4).hex()}")
     os.makedirs(local_dir, exist_ok=True)
+    local_smi = os.path.join(local_dir, "ligands.smi")
 
-    selected_compounds = []
-
-    # Try PDBQT first (has rank/smiles/score in REMARK lines)
-    local_pdbqt = os.path.join(local_dir, "ligands_input.pdbqt")
-    ok, _ = server.download_file(remote_pdbqt, local_pdbqt)
-    if ok and os.path.exists(local_pdbqt):
-        import re as _re
-        rank = smiles = score = None
-        with open(local_pdbqt) as f:
-            for line in f:
-                if line.startswith("REMARK DrugCLIP"):
-                    m = _re.search(r"rank=(\d+).*score=([\d.]+)", line)
-                    if m:
-                        rank = int(m.group(1))
-                        score = float(m.group(2))
-                elif line.startswith("REMARK SMILES="):
-                    smiles = line.strip().split("=", 1)[1]
-                    if rank is not None and smiles:
-                        selected_compounds.append((rank, smiles, score or 0.0))
-                        rank = smiles = score = None
-    else:
-        # Fall back to SMI file (rank_N name, no score)
-        local_smi = os.path.join(local_dir, "ligands.smi")
-        ok, err = server.download_file(remote_smi, local_smi)
-        if not ok:
-            flash(f"Could not retrieve original ligand file: {err}", "danger")
-            return redirect(url_for("docking.detail", docking_id=docking_id))
+    selected_ranks: set[int] = set()
+    ok, _ = server.download_file(remote_smi, local_smi)
+    if ok and os.path.exists(local_smi):
         with open(local_smi) as f:
-            for i, line in enumerate(f):
+            for line in f:
                 parts = line.strip().split()
-                if parts:
-                    smiles = parts[0]
-                    selected_compounds.append((i + 1, smiles, 0.0))
+                if len(parts) >= 2:
+                    name = parts[1]  # e.g. "rank_1"
+                    if name.startswith("rank_"):
+                        try:
+                            selected_ranks.add(int(name[5:]))
+                        except ValueError:
+                            pass
+
+    if selected_ranks:
+        selected_compounds = [(r, s, sc) for r, s, sc in all_results if r in selected_ranks]
+    else:
+        # Fall back: use all results up to original n_compounds
+        selected_compounds = list(all_results[:original.n_compounds])
 
     if not selected_compounds:
-        flash("Could not parse compounds from original docking job.", "danger")
+        flash("Could not determine which compounds were originally selected. "
+              "Please re-submit from the screening results page.", "danger")
         return redirect(url_for("docking.detail", docking_id=docking_id))
 
     service = DockingSubmissionService(SlurmClient(), docking_store, PROJECT_ROOT)
