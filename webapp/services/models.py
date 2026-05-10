@@ -145,3 +145,75 @@ class JobRecord:
             error_message=data.get('error_message'),
             child_job_ids=data.get('child_job_ids'),
         )
+
+
+@dataclass
+class DockingRecord:
+    """Persistent metadata for an AutoDock-GPU docking job."""
+
+    docking_id: str
+    screening_job_id: str
+    slurm_job_id: Optional[str]
+    session_id: str
+    email: str                             # Owner's email address
+    target_name: str
+    library_name: str
+    n_compounds: int
+    center_x: float
+    center_y: float
+    center_z: float
+    status: str
+    submitted_at: str
+    updated_at: str
+    job_dir: str                           # Remote HPC path
+    log_path: Optional[str] = None
+    summary_path: Optional[str] = None    # Remote HPC path to summary.csv
+    local_summary_path: Optional[str] = None  # Local cached copy
+    error_message: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        return {
+            'docking_id': self.docking_id,
+            'screening_job_id': self.screening_job_id,
+            'slurm_job_id': self.slurm_job_id,
+            'session_id': self.session_id,
+            'email': self.email,
+            'target_name': self.target_name,
+            'library_name': self.library_name,
+            'n_compounds': self.n_compounds,
+            'center_x': self.center_x,
+            'center_y': self.center_y,
+            'center_z': self.center_z,
+            'status': self.status,
+            'submitted_at': self.submitted_at,
+            'updated_at': self.updated_at,
+            'job_dir': self.job_dir,
+            'log_path': self.log_path,
+            'summary_path': self.summary_path,
+            'local_summary_path': self.local_summary_path,
+            'error_message': self.error_message,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> 'DockingRecord':
+        return cls(
+            docking_id=data['docking_id'],
+            screening_job_id=data['screening_job_id'],
+            slurm_job_id=data.get('slurm_job_id'),
+            session_id=data['session_id'],
+            email=data.get('email', ''),
+            target_name=data['target_name'],
+            library_name=data['library_name'],
+            n_compounds=data['n_compounds'],
+            center_x=data['center_x'],
+            center_y=data['center_y'],
+            center_z=data['center_z'],
+            status=data['status'],
+            submitted_at=data['submitted_at'],
+            updated_at=data['updated_at'],
+            job_dir=data['job_dir'],
+            log_path=data.get('log_path'),
+            summary_path=data.get('summary_path'),
+            local_summary_path=data.get('local_summary_path'),
+            error_message=data.get('error_message'),
+        )

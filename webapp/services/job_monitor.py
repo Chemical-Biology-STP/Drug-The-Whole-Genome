@@ -60,93 +60,187 @@ class JobMonitor:
     def poll_once(self) -> None:
         """Poll SLURM for all active jobs and update the store."""
         try:
-            active_jobs = self._job_store.get_active_jobs()
-            if not active_jobs:
-                return
-
-            # Collect all SLURM IDs to query — for large-scale jobs use child IDs
-            all_slurm_ids: set[str] = set()
-            for job in active_jobs:
-                if job.child_job_ids:
-                    all_slurm_ids.update(job.child_job_ids)
-                else:
-                    all_slurm_ids.add(job.job_id)
-
-            # squeue for currently queued/running
-            squeue_results = self._slurm_client.squeue(job_ids=list(all_slurm_ids))
-            squeue_map = {e["job_id"]: e["state"] for e in squeue_results}
-
-            # sacct for finished
-            missing_ids = [jid for jid in all_slurm_ids if jid not in squeue_map]
-            sacct_map: dict[str, str] = {}
-            if missing_ids:
-                sacct_results = self._slurm_client.sacct(missing_ids)
-                for e in sacct_results:
-                    raw_id = e["job_id"]
-                    # Strip array task suffix (e.g. "46384818_0" → "46384818")
-                    # and sub-job suffix (e.g. "46384818.batch" → skip)
-                    if "." in raw_id:
-                        continue
-                    base_id = raw_id.split("_")[0]
-                    state = e["state"]
-                    if state.startswith("CANCELLED"):
-                        state = "CANCELLED"
-                    # Keep the worst state seen for this base job ID
-                    existing = sacct_map.get(base_id)
-                    if existing is None:
-                        sacct_map[base_id] = state
-                    else:
-                        # Priority: FAILED > TIMEOUT > CANCELLED > COMPLETED > RUNNING > PENDING
-                        priority = {"FAILED": 6, "TIMEOUT": 5, "CANCELLED": 4,
-                                    "COMPLETED": 3, "RUNNING": 2, "PENDING": 1}
-                        if priority.get(state, 0) > priority.get(existing, 0):
-                            sacct_map[base_id] = state
-
-            now = datetime.now(timezone.utc).isoformat()
-
-            for record in active_jobs:
-                if record.child_job_ids:
-                    new_status = self._aggregate_child_status(
-                        record.child_job_ids, squeue_map, sacct_map
-                    )
-                else:
-                    jid = record.job_id
-                    if jid in squeue_map:
-                        new_status = self._normalize_status(squeue_map[jid])
-                    elif jid in sacct_map:
-                        new_status = self._normalize_status(sacct_map[jid])
-                    else:
-                        new_status = "FAILED"
-
-                if new_status == record.status:
-                    continue
-
-                updates: dict = {"status": new_status, "updated_at": now}
-
-                if new_status == "COMPLETED":
-                    remote_results = f"{record.job_dir}/results.txt"
-                    local_results = self._download_results(record.job_id, remote_results)
-                    if local_results:
-                        updates["results_path"] = local_results
-                    else:
-                        new_status = "FAILED"
-                        updates["status"] = "FAILED"
-                        updates["error_message"] = "Job completed but results.txt was not found on the HPC."
-
-                elif new_status in ("FAILED", "TIMEOUT"):
-                    error_msg = self._fetch_log_tail(record.log_path)
-                    if error_msg:
-                        updates["error_message"] = error_msg
-
-                self._job_store.update_job(record.job_id, updates)
-                logger.info("Job %s: %s -> %s (owner: %s)",
-                            record.job_id, record.status, new_status, record.email)
-
-                if new_status in TERMINAL_STATES and record.email:
-                    self._send_notification(record, new_status)
-
+            self._poll_screening_jobs()
         except Exception:
-            logger.exception("Error in JobMonitor.poll_once()")
+            logger.exception("Error in JobMonitor._poll_screening_jobs()")
+        try:
+            self._poll_docking_jobs()
+        except Exception:
+            logger.exception("Error in JobMonitor._poll_docking_jobs()")
+
+    def _poll_screening_jobs(self) -> None:
+        """Poll SLURM for active screening jobs."""
+        active_jobs = self._job_store.get_active_jobs()
+        if not active_jobs:
+            return
+
+        # Collect all SLURM IDs to query — for large-scale jobs use child IDs
+        all_slurm_ids: set[str] = set()
+        for job in active_jobs:
+            if job.child_job_ids:
+                all_slurm_ids.update(job.child_job_ids)
+            else:
+                all_slurm_ids.add(job.job_id)
+
+        # squeue for currently queued/running
+        squeue_results = self._slurm_client.squeue(job_ids=list(all_slurm_ids))
+        squeue_map = {e["job_id"]: e["state"] for e in squeue_results}
+
+        # sacct for finished
+        missing_ids = [jid for jid in all_slurm_ids if jid not in squeue_map]
+        sacct_map: dict[str, str] = {}
+        if missing_ids:
+            sacct_results = self._slurm_client.sacct(missing_ids)
+            for e in sacct_results:
+                raw_id = e["job_id"]
+                if "." in raw_id:
+                    continue
+                base_id = raw_id.split("_")[0]
+                state = e["state"]
+                if state.startswith("CANCELLED"):
+                    state = "CANCELLED"
+                existing = sacct_map.get(base_id)
+                if existing is None:
+                    sacct_map[base_id] = state
+                else:
+                    priority = {"FAILED": 6, "TIMEOUT": 5, "CANCELLED": 4,
+                                "COMPLETED": 3, "RUNNING": 2, "PENDING": 1}
+                    if priority.get(state, 0) > priority.get(existing, 0):
+                        sacct_map[base_id] = state
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        for record in active_jobs:
+            if record.child_job_ids:
+                new_status = self._aggregate_child_status(record.child_job_ids, squeue_map, sacct_map)
+            else:
+                jid = record.job_id
+                if jid in squeue_map:
+                    new_status = self._normalize_status(squeue_map[jid])
+                elif jid in sacct_map:
+                    new_status = self._normalize_status(sacct_map[jid])
+                else:
+                    new_status = "FAILED"
+
+            if new_status == record.status:
+                continue
+
+            updates: dict = {"status": new_status, "updated_at": now}
+
+            if new_status == "COMPLETED":
+                remote_results = f"{record.job_dir}/results.txt"
+                local_results = self._download_results(record.job_id, remote_results)
+                if local_results:
+                    updates["results_path"] = local_results
+                else:
+                    new_status = "FAILED"
+                    updates["status"] = "FAILED"
+                    updates["error_message"] = "Job completed but results.txt was not found on the HPC."
+            elif new_status in ("FAILED", "TIMEOUT"):
+                error_msg = self._fetch_log_tail(record.log_path)
+                if error_msg:
+                    updates["error_message"] = error_msg
+
+            self._job_store.update_job(record.job_id, updates)
+            logger.info("Screening job %s: %s -> %s (owner: %s)",
+                        record.job_id, record.status, new_status, record.email)
+
+            if new_status in TERMINAL_STATES and record.email:
+                self._send_notification(record, new_status)
+
+    def _poll_docking_jobs(self) -> None:
+        """Poll SLURM for active docking jobs and download results on completion."""
+        try:
+            from webapp.services.docking_store import DockingStore
+            import os
+            docking_store_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "data", "docking_jobs.json"
+            )
+            docking_store = DockingStore(docking_store_path)
+        except Exception:
+            return
+
+        active = docking_store.get_active()
+        if not active:
+            return
+
+        job_ids = [d.slurm_job_id for d in active if d.slurm_job_id]
+        if not job_ids:
+            return
+
+        squeue_results = self._slurm_client.squeue(job_ids=job_ids)
+        squeue_map = {e["job_id"]: e["state"] for e in squeue_results}
+
+        missing = [jid for jid in job_ids if jid not in squeue_map]
+        sacct_map: dict[str, str] = {}
+        if missing:
+            for e in self._slurm_client.sacct(missing):
+                if "." not in e["job_id"]:
+                    sacct_map[e["job_id"].split("_")[0]] = e["state"]
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        for record in active:
+            jid = record.slurm_job_id
+            if jid in squeue_map:
+                new_status = self._normalize_status(squeue_map[jid])
+            elif jid in sacct_map:
+                new_status = self._normalize_status(sacct_map[jid])
+            else:
+                new_status = "FAILED"
+
+            if new_status == record.status:
+                continue
+
+            updates: dict = {"status": new_status, "updated_at": now}
+
+            if new_status == "COMPLETED":
+                # Download summary.csv from HPC
+                import tempfile
+                local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking", record.docking_id)
+                os.makedirs(local_dir, exist_ok=True)
+                local_summary = os.path.join(local_dir, "summary.csv")
+                server = RemoteServer(REMOTE_HOST, REMOTE_USER)
+                ok, _ = server.download_file(record.summary_path, local_summary)
+                if ok:
+                    updates["local_summary_path"] = local_summary
+                else:
+                    new_status = "FAILED"
+                    updates["status"] = "FAILED"
+                    updates["error_message"] = "Docking completed but summary.csv was not found."
+            elif new_status in ("FAILED", "TIMEOUT"):
+                error_msg = self._fetch_log_tail(record.log_path)
+                if error_msg:
+                    updates["error_message"] = error_msg
+
+            docking_store.update(record.docking_id, updates)
+            logger.info("Docking job %s: %s -> %s (owner: %s)",
+                        record.docking_id, record.status, new_status, record.email)
+
+            # Send email notification
+            if new_status in TERMINAL_STATES and record.email:
+                self._send_docking_notification(record, new_status)
+
+    def _send_docking_notification(self, record, status: str) -> None:
+        from webapp.modules.auth import send_email_via_hpc
+        from webapp.config import APP_BASE_URL
+        label = f"{record.target_name} ({record.n_compounds} compounds)"
+        if status == "COMPLETED":
+            subject = f"[DrugCLIP] Docking complete: {label}"
+            body = (f"Your AutoDock-GPU docking job has completed.\n\n"
+                    f"Target: {record.target_name}\nCompounds: {record.n_compounds}\n\n"
+                    f"View results at:\n{APP_BASE_URL}/docking/{record.docking_id}/results\n\n"
+                    f"— DrugCLIP Virtual Screening")
+        else:
+            subject = f"[DrugCLIP] Docking {status.lower()}: {label}"
+            body = (f"Your docking job ended with status: {status}\n\n"
+                    f"Target: {record.target_name}\nJob: {record.docking_id}\n\n"
+                    f"— DrugCLIP Virtual Screening")
+        try:
+            send_email_via_hpc(record.email, subject, body)
+        except Exception as exc:
+            logger.warning("Failed to send docking email: %s", exc)
 
     def _aggregate_child_status(
         self,

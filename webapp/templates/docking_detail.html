@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Docking Job {{ job.docking_id }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="{{ url_for('dashboard.index') }}">Dashboard</a></li>
+                <li class="breadcrumb-item"><a href="{{ url_for('jobs.detail', job_id=job.screening_job_id) }}">Screening Job {{ job.screening_job_id }}</a></li>
+                <li class="breadcrumb-item active">Docking {{ job.docking_id }}</li>
+            </ol>
+        </nav>
+        <h2 class="mb-4">
+            Docking Job <code>{{ job.docking_id }}</code>
+            <span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span>
+        </h2>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-list-check me-2"></i>Parameters</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-sm">
+                    <tbody>
+                        <tr><th>Target</th><td>{{ job.target_name }}</td></tr>
+                        <tr><th>Library</th><td>{{ job.library_name }}</td></tr>
+                        <tr><th>Compounds docked</th><td>{{ job.n_compounds }}</td></tr>
+                        <tr><th>Binding site centre</th>
+                            <td>({{ job.center_x }}, {{ job.center_y }}, {{ job.center_z }}) Å</td></tr>
+                        <tr><th>SLURM Job ID</th><td>{{ job.slurm_job_id or '—' }}</td></tr>
+                        <tr><th>Submitted</th><td>{{ job.submitted_at | datetimeformat }}</td></tr>
+                        <tr><th>Last updated</th><td>{{ job.updated_at | datetimeformat }}</td></tr>
+                        <tr><th>Job directory</th><td><code>{{ job.job_dir }}</code></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if job.status in ('RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT') %}
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0"><i class="bi bi-terminal me-2"></i>SLURM Log</h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="refresh-log-btn">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh Log
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="log-viewer" id="log-viewer">
+                    <p class="text-muted">Click "Refresh Log" to load the latest output.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if job.status in ('FAILED', 'TIMEOUT') and job.error_message %}
+        <div class="card mb-4 border-danger">
+            <div class="card-header bg-danger text-white">
+                <h5 class="card-title mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Error Details</h5>
+            </div>
+            <div class="card-body">
+                <pre class="mb-0 text-danger">{{ job.error_message }}</pre>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0"><i class="bi bi-gear me-2"></i>Actions</h5>
+            </div>
+            <div class="card-body">
+                {% if job.status == 'COMPLETED' %}
+                <a href="{{ url_for('docking.results', docking_id=job.docking_id) }}"
+                   class="btn btn-success w-100 mb-2">
+                    <i class="bi bi-table me-1"></i>View Docking Results
+                </a>
+                {% endif %}
+
+                {% if job.status in ('PENDING', 'RUNNING') %}
+                <a href="{{ url_for('docking.detail', docking_id=job.docking_id) }}"
+                   class="btn btn-outline-secondary w-100 mb-2">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh Status
+                </a>
+                <form method="POST" action="{{ url_for('docking.cancel', docking_id=job.docking_id) }}"
+                      onsubmit="return confirm('Cancel this docking job?');">
+                    <button type="submit" class="btn btn-danger w-100 mb-2">
+                        <i class="bi bi-x-circle me-1"></i>Cancel Job
+                    </button>
+                </form>
+                {% endif %}
+
+                {% if job.status not in ('PENDING', 'RUNNING') %}
+                <form method="POST" action="{{ url_for('docking.delete', docking_id=job.docking_id) }}"
+                      onsubmit="return confirm('Delete this docking job record?');">
+                    <button type="submit" class="btn btn-outline-danger w-100 mb-2">
+                        <i class="bi bi-trash me-1"></i>Delete Record
+                    </button>
+                </form>
+                {% endif %}
+
+                <a href="{{ url_for('jobs.detail', job_id=job.screening_job_id) }}"
+                   class="btn btn-outline-secondary w-100">
+                    <i class="bi bi-arrow-left me-1"></i>Back to Screening Job
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+{% if job.status in ('PENDING', 'RUNNING') %}
+<script>
+// Auto-refresh every 30 seconds while job is active
+setTimeout(function() { window.location.reload(); }, 30000);
+</script>
+{% endif %}
+{% if job.status in ('RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT') %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('refresh-log-btn');
+    var viewer = document.getElementById('log-viewer');
+    if (!btn || !viewer) return;
+    btn.addEventListener('click', function () {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Loading...';
+        fetch('/jobs/{{ job.slurm_job_id }}/log')
+            .then(r => r.ok ? r.json() : Promise.reject())
+            .then(d => { viewer.textContent = d.log || 'No log content available.'; })
+            .catch(() => { viewer.textContent = 'Error loading log.'; })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Log';
+            });
+    });
+});
+</script>
+{% endif %}
+{% endblock %}
