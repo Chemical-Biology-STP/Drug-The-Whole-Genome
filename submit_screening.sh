@@ -47,8 +47,8 @@
 
 set -euo pipefail
 
-# Always run from the project root regardless of where sbatch was called from
-cd "$(dirname "$0")"
+# Always run from the project root
+cd /nemo/stp/chemicalbiology/home/shared/software/drugclip
 
 mkdir -p jobs/logs
 

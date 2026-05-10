@@ -42,7 +42,7 @@
 set -euo pipefail
 
 # Always run from the project root regardless of where the script was called from
-cd "$(dirname "$0")"
+cd /nemo/stp/chemicalbiology/home/shared/software/drugclip
 DRUGCLIP_ROOT="$PWD"
 
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
