@@ -221,7 +221,7 @@ pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Uti
     -p ga_run="$NRUN"
 cd "$DRUGCLIP_ROOT"
 
-autodock_gpu_64wi \
+autodock_gpu_128wi \
     --ffile "${GRID_DIR}/receptor.maps.fld" \
     --lfile "$LIGANDS_PDBQT" \
     --nrun "$NRUN" \
