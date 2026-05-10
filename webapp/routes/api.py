@@ -26,28 +26,31 @@ def list_libraries():
     server.run_command(f"mkdir -p {REMOTE_LIBRARIES_DIR}")
 
     # List files with sizes: "bytes filename"
-    out, err = server.run_command(
-        f"find {REMOTE_LIBRARIES_DIR} -maxdepth 1 -type f "
-        f"\\( -name '*.sdf' -o -name '*.smi' -o -name '*.smiles' -o -name '*.txt' \\) "
-        f"-printf '%s\\t%f\\n' 2>/dev/null | sort -k2"
-    )
+    # List SDF/SMI files — use separate ls calls to avoid glob-no-match failures
+    lib_dir = REMOTE_LIBRARIES_DIR
+    files = []
+    for ext in ("sdf", "smi", "smiles", "txt"):
+        out, _ = server.run_command(f"ls {lib_dir}/*.{ext} 2>/dev/null")
+        if out:
+            files.extend(p.strip() for p in out.splitlines() if p.strip())
+
+    import logging
+    logging.getLogger(__name__).info("API libraries files: %s", files)
 
     libraries = []
-    if out:
-        for line in out.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split("\t", 1)
-            if len(parts) == 2:
-                size_bytes = int(parts[0])
-                filename = parts[1]
-                libraries.append({
-                    "name": filename,
-                    "path": f"{REMOTE_LIBRARIES_DIR}/{filename}",
-                    "size": _format_size(size_bytes),
-                    "size_bytes": size_bytes,
-                })
+    for filepath in sorted(files):
+        filename = filepath.split("/")[-1]
+        size_out, _ = server.run_command(f"wc -c < {filepath} 2>/dev/null")
+        try:
+            size_bytes = int((size_out or "0").strip())
+        except ValueError:
+            size_bytes = 0
+        libraries.append({
+            "name": filename,
+            "path": filepath,
+            "size": _format_size(size_bytes),
+            "size_bytes": size_bytes,
+        })
 
     return jsonify({"libraries": libraries})
 
