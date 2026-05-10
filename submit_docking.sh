@@ -112,13 +112,13 @@ if [[ "$LIGANDS_FILE" == *.smi ]]; then
     echo ""
     echo "[Step 1/4] Converting SMILES to PDBQT..."
     LIGANDS_PDBQT="${JOB_DIR}/ligands_input.pdbqt"
-    pixi run python - << 'PYEOF'
+    pixi run python - "$LIGANDS_FILE" "$LIGANDS_PDBQT" << 'PYEOF'
 import sys, os, subprocess, tempfile
 from rdkit import Chem
 from rdkit.Chem import AllChem
 
-smi_file = os.environ.get('LIGANDS_SMI')
-out_file  = os.environ.get('LIGANDS_PDBQT')
+smi_file = sys.argv[1]
+out_file  = sys.argv[2]
 blocks = []
 n_ok = n_fail = 0
 
@@ -154,8 +154,6 @@ with open(out_file, 'w') as f:
     f.write('\n'.join(blocks))
 print(f'Converted {n_ok} ligands ({n_fail} failed)')
 PYEOF
-    export LIGANDS_SMI="$LIGANDS_FILE"
-    export LIGANDS_PDBQT
 else
     echo ""
     echo "[Step 1/4] Ligand PDBQT already provided — skipping conversion"
