@@ -198,8 +198,8 @@ pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Uti
     -p gridcenter="${CENTER_X},${CENTER_Y},${CENTER_Z}"
 cd "$DRUGCLIP_ROOT"
 
-# Run autogrid4
-cd "$GRID_DIR"
+# Run autogrid4 from the job directory so it finds receptor.pdbqt
+cd "$JOB_DIR"
 autogrid4 -p "$GPF" -l "${GRID_DIR}/receptor.glg"
 cd "$DRUGCLIP_ROOT"
 
