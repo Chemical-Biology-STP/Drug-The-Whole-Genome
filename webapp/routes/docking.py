@@ -562,6 +562,81 @@ def contact_residues(docking_id: str, result_stem: str):
 # Cancel / Delete
 # ---------------------------------------------------------------------------
 
+@docking_bp.route("/docking/<docking_id>/restart", methods=["POST"])
+def restart(docking_id: str):
+    """Re-submit a failed/cancelled docking job with the same parameters."""
+    email = _email()
+    if not email:
+        abort(403)
+    docking_store = _get_docking_store()
+    original = docking_store.get(docking_id)
+    if original is None:
+        abort(404)
+    if not _owns(original, email):
+        abort(403)
+
+    # Get the parent screening record for receptor path etc.
+    job_store = _get_job_store()
+    screening_record = job_store.get_job(original.screening_job_id)
+    if screening_record is None:
+        flash("Parent screening job not found.", "danger")
+        return redirect(url_for("docking.detail", docking_id=docking_id))
+
+    # Reconstruct the compound list from the original docking job's ligand PDBQT
+    # by downloading it from the HPC and parsing REMARK lines
+    server = _server()
+    remote_ligands = f"{original.job_dir}/ligands_input.pdbqt"
+    local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking_restart", docking_id)
+    os.makedirs(local_dir, exist_ok=True)
+    local_ligands = os.path.join(local_dir, "ligands_input.pdbqt")
+
+    ok, err = server.download_file(remote_ligands, local_ligands)
+    if not ok:
+        flash(f"Could not retrieve original ligand file: {err}", "danger")
+        return redirect(url_for("docking.detail", docking_id=docking_id))
+
+    # Parse (rank, smiles, score) from REMARK lines
+    selected_compounds = []
+    rank = smiles = score = None
+    with open(local_ligands) as f:
+        for line in f:
+            if line.startswith("REMARK DrugCLIP"):
+                import re as _re
+                m = _re.search(r"rank=(\d+).*score=([\d.]+)", line)
+                if m:
+                    rank = int(m.group(1))
+                    score = float(m.group(2))
+            elif line.startswith("REMARK SMILES="):
+                smiles = line.strip().split("=", 1)[1]
+                if rank is not None and smiles:
+                    selected_compounds.append((rank, smiles, score or 0.0))
+                    rank = smiles = score = None
+
+    if not selected_compounds:
+        flash("Could not parse compounds from original docking job.", "danger")
+        return redirect(url_for("docking.detail", docking_id=docking_id))
+
+    service = DockingSubmissionService(SlurmClient(), docking_store, PROJECT_ROOT)
+    try:
+        new_record = service.submit(
+            email=email,
+            screening_record=screening_record,
+            selected_compounds=selected_compounds,
+            center_x=original.center_x,
+            center_y=original.center_y,
+            center_z=original.center_z,
+        )
+    except RuntimeError as e:
+        flash(f"Restart failed: {e}", "danger")
+        return redirect(url_for("docking.detail", docking_id=docking_id))
+    except SlurmError as e:
+        flash(f"Restart failed: {e.stderr}", "danger")
+        return redirect(url_for("docking.detail", docking_id=docking_id))
+
+    flash(f"Docking job restarted! New SLURM job {new_record.slurm_job_id}", "success")
+    return redirect(url_for("docking.detail", docking_id=new_record.docking_id))
+
+
 @docking_bp.route("/docking/<docking_id>/cancel", methods=["POST"])
 def cancel(docking_id: str):
     email = _email()

@@ -76,6 +76,18 @@
                 <h5 class="card-title mb-0"><i class="bi bi-gear me-2"></i>Actions</h5>
             </div>
             <div class="card-body">
+                {% if job.status in ('FAILED', 'TIMEOUT', 'CANCELLED') %}
+                <form method="POST" action="{{ url_for('docking.restart', docking_id=job.docking_id) }}"
+                      onsubmit="return confirm('Re-submit this docking job with the same parameters?');"
+                      data-loading
+                      data-loading-title="Restarting docking job…"
+                      data-loading-subtitle="Uploading files and submitting to the HPC. Please do not close this window.">
+                    <button type="submit" class="btn btn-warning w-100 mb-2">
+                        <i class="bi bi-arrow-repeat me-1"></i>Restart Job
+                    </button>
+                </form>
+                {% endif %}
+
                 {% if job.status == 'COMPLETED' %}
                 <a href="{{ url_for('docking.results', docking_id=job.docking_id) }}"
                    class="btn btn-success w-100 mb-2">
