@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
-#SBATCH --output=jobs/logs/slurm_%j.log
+#SBATCH --output=/nemo/stp/chemicalbiology/home/shared/software/drugclip/jobs/logs/slurm_%j.log
 
 # ============================================================================
 # DrugCLIP Virtual Screening Pipeline
