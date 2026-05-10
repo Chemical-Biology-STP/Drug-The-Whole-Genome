@@ -225,7 +225,7 @@ cat > "$CONVERT_SCRIPT" << 'CONVERT_EOF'
 #!/bin/bash
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=7-00:00:00
 
 set -euo pipefail
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
@@ -273,7 +273,7 @@ cat > "$ENCODE_SCRIPT" << 'ENCODE_EOF'
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=08:00:00
+#SBATCH --time=7-00:00:00
 
 set -euo pipefail
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
@@ -342,7 +342,7 @@ cat > "$SCREEN_SCRIPT" << SCREEN_EOF
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=04:00:00
+#SBATCH --time=7-00:00:00
 
 set -euo pipefail
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
