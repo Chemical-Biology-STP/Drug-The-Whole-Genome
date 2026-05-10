@@ -163,17 +163,15 @@ document.addEventListener('DOMContentLoaded', function () {
     updateLibraryPanel();
 
     // ── Saved libraries loader ──────────────────────────────────────────────
-    var savedLibrariesLoaded = false;
-
     function loadSavedLibraries() {
-        if (savedLibrariesLoaded) return;
         var select = document.getElementById('lib-saved-select');
         if (!select) return;
+
+        select.innerHTML = '<option value="">Loading…</option>';
 
         fetch('/api/libraries')
             .then(function(r) { return r.json(); })
             .then(function(data) {
-                savedLibrariesLoaded = true;
                 select.innerHTML = '';
                 var libs = data.libraries || [];
                 if (libs.length === 0) {
