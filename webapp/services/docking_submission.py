@@ -126,6 +126,7 @@ class DockingSubmissionService:
         import tempfile, os
         local_tmp = tempfile.mkdtemp(prefix="drugclip_dock_")
         ligands_pdbqt_local = os.path.join(local_tmp, "ligands_input.pdbqt")
+        remote_ligands = f"{remote_job_dir}/ligands_input.pdbqt"  # default; overridden on fallback
 
         try:
             pdbqt_bytes, n_ok, n_fail = _smiles_to_pdbqt_local(selected_compounds)
@@ -150,13 +151,15 @@ class DockingSubmissionService:
                 raise RuntimeError(f"Failed to upload SMILES file: {err}")
             ligands_pdbqt_local = None
             n_compounds = len(selected_compounds)
+            remote_ligands = remote_smiles  # pass the .smi file to the script
 
         # Upload ligand PDBQT (if generated locally)
-        remote_ligands = f"{remote_job_dir}/ligands_input.pdbqt"
-        if ligands_pdbqt_local:
+        if ligands_pdbqt_local is not None:
+            remote_ligands = f"{remote_job_dir}/ligands_input.pdbqt"
             ok, err = server.upload_file(ligands_pdbqt_local, remote_ligands)
             if not ok:
                 raise RuntimeError(f"Failed to upload ligand PDBQT: {err}")
+        # (if ligands_pdbqt_local is None, remote_ligands was already set to remote_smiles above)
 
         # --- Receptor PDB ---
         pdb_path = screening_record.params.get("pdb_path", "")
