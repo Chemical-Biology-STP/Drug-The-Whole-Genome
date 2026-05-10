@@ -188,12 +188,15 @@ mkdir -p "$GRID_DIR"
 GPF="${GRID_DIR}/receptor.gpf"
 NPTS=$(python3 -c "import math; n=int(math.ceil($BOX_SIZE/0.375)); print(n if n%2==0 else n+1)")
 
+# Run prepare_gpf4 from the job directory so MolKit can find files by relative path
+cd "$JOB_DIR"
 pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_gpf4.py \
     -r "$RECEPTOR_PDBQT" \
     -l "$LIGANDS_PDBQT" \
     -o "$GPF" \
     -p npts="${NPTS},${NPTS},${NPTS}" \
     -p gridcenter="${CENTER_X},${CENTER_Y},${CENTER_Z}"
+cd "$DRUGCLIP_ROOT"
 
 # Run autogrid4
 cd "$GRID_DIR"
@@ -209,12 +212,14 @@ echo ""
 echo "[Step 4/4] Running AutoDock-GPU..."
 
 DPF="${JOB_DIR}/docking.dpf"
+cd "$JOB_DIR"
 pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_dpf42.py \
     -r "$RECEPTOR_PDBQT" \
     -l "$LIGANDS_PDBQT" \
     -o "$DPF" \
     -p ga_num_evals=2500000 \
     -p ga_run="$NRUN"
+cd "$DRUGCLIP_ROOT"
 
 autodock_gpu_64wi \
     --ffile "${GRID_DIR}/receptor.maps.fld" \
