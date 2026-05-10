@@ -56,15 +56,26 @@ def hash_file(path, algo="sha256"):
 def find_existing_lmdb(source_hash, search_dirs):
     """Search for an LMDB that was built from the same source file.
 
-    Looks for LMDB files in each search directory and checks their
-    __source_hash__ metadata key.
-
-    Returns the path of the first match, or None.
+    Checks sidecar .meta files first (new format), then falls back to
+    checking __source_hash__ keys inside the LMDB (legacy format).
     """
     for search_dir in search_dirs:
         if not os.path.isdir(search_dir):
             continue
         for lmdb_path in glob.glob(os.path.join(search_dir, "*.lmdb")):
+            # Check sidecar meta file first (new format — no metadata in LMDB)
+            meta_path = lmdb_path + ".meta"
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path) as f:
+                        for line in f:
+                            if line.startswith("source_hash="):
+                                if line.strip().split("=", 1)[1] == source_hash:
+                                    return lmdb_path
+                except Exception:
+                    pass
+                continue
+            # Legacy: check __source_hash__ key inside LMDB
             try:
                 env = lmdb.open(lmdb_path, subdir=False, readonly=True, lock=False)
                 with env.begin() as txn:
@@ -260,19 +271,21 @@ def main():
             txn.put(str(count).encode("ascii"), serialized)
             count += 1
 
+        # Store metadata as separate keys — NOTE: these are filtered out
+        # by the validation step and not read by unicore's LMDBDataset
         digest = content_hash.hexdigest()
         txn.put(b"__content_hash__", digest.encode("ascii"))
         txn.put(b"__source_hash__", source_hash.encode("ascii"))
 
     env.close()
 
-    # --- Validate: verify every entry can be unpickled ---
+    # --- Validate: verify every molecule entry can be unpickled ---
     print("Validating LMDB entries...")
     env = lmdb.open(args.output, subdir=False, readonly=True, lock=False)
     bad_keys = []
     with env.begin() as txn:
         cursor = txn.cursor()
-        for key, value in cursor.iternext_dup() if False else cursor.iternext():
+        for key, value in cursor.iternext():
             if key in (b"__content_hash__", b"__source_hash__"):
                 continue
             try:
@@ -292,6 +305,24 @@ def main():
         print(f"Removed {len(bad_keys)} corrupt entries. Final count: {count}")
     else:
         print("All entries validated successfully.")
+
+    # --- Remove metadata keys so unicore LMDBDataset only sees molecule entries ---
+    env = lmdb.open(args.output, subdir=False, map_size=map_size)
+    with env.begin(write=True) as txn:
+        txn.delete(b"__content_hash__")
+        txn.delete(b"__source_hash__")
+    env.close()
+
+    # Write metadata to a sidecar file instead
+    meta_path = args.output + ".meta"
+    with open(meta_path, "w") as f:
+        f.write(f"source_hash={source_hash}\n")
+        f.write(f"content_hash={digest}\n")
+        f.write(f"count={count}\n")
+
+    print(f"Wrote {count} molecules to {args.output}")
+    print(f"Content hash: {digest}")
+    print(f"Source hash:  {source_hash}")
     print(f"Content hash: {digest}")
     print(f"Source hash:  {source_hash}")
 
