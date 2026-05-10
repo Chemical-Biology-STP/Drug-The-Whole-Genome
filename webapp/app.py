@@ -48,6 +48,21 @@ def create_app() -> Flask:
         logger.warning("flask-session not installed; server-side sessions disabled.")
 
     # ------------------------------------------------------------------
+    # Jinja2 filters
+    # ------------------------------------------------------------------
+
+    @app.template_filter("datetimeformat")
+    def datetimeformat(value: str) -> str:
+        """Format an ISO 8601 timestamp into a human-readable string."""
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromisoformat(value)
+            dt = dt.astimezone(timezone.utc)
+            return dt.strftime("%-d %b %Y, %H:%M UTC")
+        except (ValueError, TypeError):
+            return value or ""
+
+    # ------------------------------------------------------------------
     # Auth helpers
     # ------------------------------------------------------------------
 
