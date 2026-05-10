@@ -171,6 +171,15 @@
                 </form>
                 {% endif %}
 
+                {% if job.status in ('FAILED', 'TIMEOUT', 'CANCELLED') %}
+                <form method="POST" action="{{ url_for('jobs.restart', job_id=job.job_id) }}"
+                      onsubmit="return confirm('Re-submit this job with the same parameters?');">
+                    <button type="submit" class="btn btn-warning w-100 mb-2">
+                        <i class="bi bi-arrow-repeat me-1"></i>Restart Job
+                    </button>
+                </form>
+                {% endif %}
+
                 {% if job.status == 'COMPLETED' %}
                 <a href="/jobs/{{ job.job_id }}/results" class="btn btn-success w-100 mb-2">
                     <i class="bi bi-table me-1"></i>View Results

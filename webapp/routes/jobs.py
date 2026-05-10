@@ -227,6 +227,69 @@ def detail(job_id: str):
     return render_template("job_detail.html", job=record, current_user=email)
 
 
+@jobs_bp.route("/<job_id>/restart", methods=["POST"])
+def restart(job_id: str):
+    """Re-submit a failed/cancelled job with the same parameters."""
+    email = _get_email()
+    if not email:
+        abort(403)
+
+    store = _get_job_store()
+    original = store.get_job(job_id)
+    if original is None:
+        abort(404)
+    if not _owns_record(original, email):
+        abort(403)
+
+    # Reconstruct JobParams from the stored params dict
+    p = original.params
+    params = JobParams(
+        session_id=email,
+        pdb_path=p.get("pdb_path", ""),
+        library_path=p.get("library_path", ""),
+        library_is_remote=p.get("library_is_remote", True),
+        binding_site_method=p.get("binding_site_method", ""),
+        ligand_path=p.get("ligand_path"),
+        residue_name=p.get("residue_name"),
+        center_x=p.get("center_x"),
+        center_y=p.get("center_y"),
+        center_z=p.get("center_z"),
+        binding_residues=p.get("binding_residues"),
+        chain_id=p.get("chain_id"),
+        cutoff=p.get("cutoff", 10.0),
+        target_name=p.get("target_name"),
+        top_fraction=p.get("top_fraction", 0.02),
+        screening_mode=original.screening_mode,
+        chunk_size=p.get("chunk_size", 1_000_000),
+        partition=p.get("partition", "ga100"),
+        max_parallel=p.get("max_parallel", 50),
+    )
+
+    service = _get_submission_service()
+    try:
+        if original.screening_mode == "large_scale":
+            record = service.submit_large_scale(params, email)
+        else:
+            record = service.submit_standard(params, email)
+    except SlurmError as e:
+        import logging
+        logging.getLogger(__name__).error(
+            "Restart failed — command: %s | stderr: %s", e.command, e.stderr
+        )
+        flash(f"Restart failed: {e.stderr or e.command or 'unknown SLURM error'}", "danger")
+        return redirect(url_for("jobs.detail", job_id=job_id))
+    except Exception as e:
+        import logging, traceback
+        logging.getLogger(__name__).error(
+            "Restart unexpected error: %s\n%s", e, traceback.format_exc()
+        )
+        flash(f"Restart failed: {e}", "danger")
+        return redirect(url_for("jobs.detail", job_id=job_id))
+
+    flash(f"Job restarted! New SLURM Job ID: {record.job_id}", "success")
+    return redirect(url_for("jobs.detail", job_id=record.job_id))
+
+
 @jobs_bp.route("/<job_id>/cancel", methods=["POST"])
 def cancel(job_id: str):
     email = _get_email()
