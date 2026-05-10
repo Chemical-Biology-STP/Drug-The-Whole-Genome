@@ -43,6 +43,7 @@ set -euo pipefail
 
 # Always run from the project root regardless of where the script was called from
 cd "$(dirname "$0")"
+DRUGCLIP_ROOT="$PWD"
 
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
 
@@ -221,18 +222,17 @@ echo "[Stage 3/5] Submitting LMDB conversion jobs..."
 mkdir -p "$LMDB_DIR"
 
 CONVERT_SCRIPT="${JOB_DIR}/convert_chunk.sh"
-cat > "$CONVERT_SCRIPT" << 'CONVERT_EOF'
+cat > "$CONVERT_SCRIPT" << CONVERT_EOF
 #!/bin/bash
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=7-00:00:00
 
 set -euo pipefail
-export PATH="/camp/home/yipy/.pixi/bin:$PATH"
+export PATH="/camp/home/yipy/.pixi/bin:\$PATH"
 
-# Always run from the project root
-PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$PROJECT_ROOT"
+# Run from the project root so relative paths resolve correctly
+cd ${DRUGCLIP_ROOT}
 
 CHUNK_DIR="$1"
 LMDB_DIR="$2"
@@ -272,7 +272,7 @@ echo "[Stage 4/5] Submitting encoding jobs (depends on Stage 3)..."
 mkdir -p "$EMB_DIR"
 
 ENCODE_SCRIPT="${JOB_DIR}/encode_chunk.sh"
-cat > "$ENCODE_SCRIPT" << 'ENCODE_EOF'
+cat > "$ENCODE_SCRIPT" << ENCODE_EOF
 #!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -280,11 +280,10 @@ cat > "$ENCODE_SCRIPT" << 'ENCODE_EOF'
 #SBATCH --time=7-00:00:00
 
 set -euo pipefail
-export PATH="/camp/home/yipy/.pixi/bin:$PATH"
+export PATH="/camp/home/yipy/.pixi/bin:\$PATH"
 
-# Always run from the project root so relative paths (./unimol, ./dict, ./data) resolve correctly
-PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$PROJECT_ROOT"
+# Run from the project root so relative paths resolve correctly
+cd ${DRUGCLIP_ROOT}
 
 LMDB_DIR="$1"
 EMB_DIR="$2"
@@ -353,11 +352,10 @@ cat > "$SCREEN_SCRIPT" << SCREEN_EOF
 #SBATCH --time=7-00:00:00
 
 set -euo pipefail
-export PATH="/camp/home/yipy/.pixi/bin:$PATH"
+export PATH="/camp/home/yipy/.pixi/bin:\$PATH"
 
-# Always run from the project root
-PROJECT_ROOT="\$(cd "\$(dirname "\$0")/../.." && pwd)"
-cd "\$PROJECT_ROOT"
+# Run from the project root so relative paths resolve correctly
+cd ${DRUGCLIP_ROOT}
 
 echo "Starting streaming screening..."
 echo "  Embeddings: ${EMB_DIR}/"
