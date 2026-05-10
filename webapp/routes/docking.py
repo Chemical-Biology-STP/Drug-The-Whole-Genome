@@ -582,35 +582,46 @@ def restart(docking_id: str):
         flash("Parent screening job not found.", "danger")
         return redirect(url_for("docking.detail", docking_id=docking_id))
 
-    # Reconstruct the compound list from the original docking job's ligand PDBQT
-    # by downloading it from the HPC and parsing REMARK lines
+    # Get the compound list — try PDBQT first, fall back to SMI file
     server = _server()
-    remote_ligands = f"{original.job_dir}/ligands_input.pdbqt"
+    remote_pdbqt = f"{original.job_dir}/ligands_input.pdbqt"
+    remote_smi = f"{original.job_dir}/ligands.smi"
     local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking_restart", docking_id)
     os.makedirs(local_dir, exist_ok=True)
-    local_ligands = os.path.join(local_dir, "ligands_input.pdbqt")
 
-    ok, err = server.download_file(remote_ligands, local_ligands)
-    if not ok:
-        flash(f"Could not retrieve original ligand file: {err}", "danger")
-        return redirect(url_for("docking.detail", docking_id=docking_id))
-
-    # Parse (rank, smiles, score) from REMARK lines
     selected_compounds = []
-    rank = smiles = score = None
-    with open(local_ligands) as f:
-        for line in f:
-            if line.startswith("REMARK DrugCLIP"):
-                import re as _re
-                m = _re.search(r"rank=(\d+).*score=([\d.]+)", line)
-                if m:
-                    rank = int(m.group(1))
-                    score = float(m.group(2))
-            elif line.startswith("REMARK SMILES="):
-                smiles = line.strip().split("=", 1)[1]
-                if rank is not None and smiles:
-                    selected_compounds.append((rank, smiles, score or 0.0))
-                    rank = smiles = score = None
+
+    # Try PDBQT first (has rank/smiles/score in REMARK lines)
+    local_pdbqt = os.path.join(local_dir, "ligands_input.pdbqt")
+    ok, _ = server.download_file(remote_pdbqt, local_pdbqt)
+    if ok and os.path.exists(local_pdbqt):
+        import re as _re
+        rank = smiles = score = None
+        with open(local_pdbqt) as f:
+            for line in f:
+                if line.startswith("REMARK DrugCLIP"):
+                    m = _re.search(r"rank=(\d+).*score=([\d.]+)", line)
+                    if m:
+                        rank = int(m.group(1))
+                        score = float(m.group(2))
+                elif line.startswith("REMARK SMILES="):
+                    smiles = line.strip().split("=", 1)[1]
+                    if rank is not None and smiles:
+                        selected_compounds.append((rank, smiles, score or 0.0))
+                        rank = smiles = score = None
+    else:
+        # Fall back to SMI file (rank_N name, no score)
+        local_smi = os.path.join(local_dir, "ligands.smi")
+        ok, err = server.download_file(remote_smi, local_smi)
+        if not ok:
+            flash(f"Could not retrieve original ligand file: {err}", "danger")
+            return redirect(url_for("docking.detail", docking_id=docking_id))
+        with open(local_smi) as f:
+            for i, line in enumerate(f):
+                parts = line.strip().split()
+                if parts:
+                    smiles = parts[0]
+                    selected_compounds.append((i + 1, smiles, 0.0))
 
     if not selected_compounds:
         flash("Could not parse compounds from original docking job.", "danger")
