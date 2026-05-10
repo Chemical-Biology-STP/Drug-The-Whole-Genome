@@ -645,6 +645,64 @@ def restart(docking_id: str):
     return redirect(url_for("docking.detail", docking_id=new_record.docking_id))
 
 
+@docking_bp.route("/docking/<docking_id>/force-refresh", methods=["POST"])
+def force_refresh(docking_id: str):
+    """Force an immediate status check for a docking job."""
+    email = _email()
+    if not email:
+        abort(403)
+    docking_store = _get_docking_store()
+    record = docking_store.get(docking_id)
+    if record is None:
+        abort(404)
+    if not _owns(record, email):
+        abort(403)
+
+    if record.slurm_job_id and record.status in ("PENDING", "RUNNING"):
+        from webapp.services.slurm_client import SlurmClient
+        from datetime import datetime, timezone
+        slurm = SlurmClient()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Check squeue first
+        squeue = slurm.squeue(job_ids=[record.slurm_job_id])
+        squeue_map = {e["job_id"]: e["state"] for e in squeue}
+
+        new_status = None
+        if record.slurm_job_id in squeue_map:
+            from webapp.services.job_monitor import JobMonitor
+            new_status = JobMonitor._normalize_status(squeue_map[record.slurm_job_id])
+        else:
+            sacct = slurm.sacct([record.slurm_job_id])
+            for e in sacct:
+                if "." not in e["job_id"]:
+                    from webapp.services.job_monitor import JobMonitor
+                    new_status = JobMonitor._normalize_status(e["state"])
+                    break
+
+        if new_status and new_status != record.status:
+            updates = {"status": new_status, "updated_at": now}
+            if new_status == "COMPLETED":
+                # Download summary.csv
+                import tempfile
+                local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking", docking_id)
+                os.makedirs(local_dir, exist_ok=True)
+                local_summary = os.path.join(local_dir, "summary.csv")
+                ok, _ = _server().download_file(record.summary_path, local_summary)
+                if ok:
+                    updates["local_summary_path"] = local_summary
+                else:
+                    new_status = "FAILED"
+                    updates["status"] = "FAILED"
+                    updates["error_message"] = "Docking completed but summary.csv was not found."
+            docking_store.update(docking_id, updates)
+            flash(f"Status updated: {new_status}", "success")
+        else:
+            flash(f"Status unchanged: {record.status}", "info")
+
+    return redirect(url_for("docking.detail", docking_id=docking_id))
+
+
 @docking_bp.route("/docking/<docking_id>/cancel", methods=["POST"])
 def cancel(docking_id: str):
     email = _email()
