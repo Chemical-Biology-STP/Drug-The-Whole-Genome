@@ -230,6 +230,10 @@ cat > "$CONVERT_SCRIPT" << 'CONVERT_EOF'
 set -euo pipefail
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
 
+# Always run from the project root
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$PROJECT_ROOT"
+
 CHUNK_DIR="$1"
 LMDB_DIR="$2"
 
@@ -277,6 +281,10 @@ cat > "$ENCODE_SCRIPT" << 'ENCODE_EOF'
 
 set -euo pipefail
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
+
+# Always run from the project root so relative paths (./unimol, ./dict, ./data) resolve correctly
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$PROJECT_ROOT"
 
 LMDB_DIR="$1"
 EMB_DIR="$2"
@@ -346,6 +354,10 @@ cat > "$SCREEN_SCRIPT" << SCREEN_EOF
 
 set -euo pipefail
 export PATH="/camp/home/yipy/.pixi/bin:$PATH"
+
+# Always run from the project root
+PROJECT_ROOT="\$(cd "\$(dirname "\$0")/../.." && pwd)"
+cd "\$PROJECT_ROOT"
 
 echo "Starting streaming screening..."
 echo "  Embeddings: ${EMB_DIR}/"
