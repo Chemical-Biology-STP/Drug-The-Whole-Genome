@@ -198,7 +198,6 @@ python ./unimol/retrieval.py --user-dir ./unimol "./dict" --valid-subset test \
        --mol-path "$MOL_LMDB" \
        --pocket-path "$POCKET_LMDB" \
        --fold-version 6_folds \
-       --use-cache False \
        --save-path "$SAVE_PATH" \
        --top-fraction "$TOP_FRACTION"
 
