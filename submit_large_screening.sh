@@ -222,20 +222,19 @@ echo "[Stage 3/5] Submitting LMDB conversion jobs..."
 mkdir -p "$LMDB_DIR"
 
 CONVERT_SCRIPT="${JOB_DIR}/convert_chunk.sh"
-cat > "$CONVERT_SCRIPT" << CONVERT_EOF
+cat > "$CONVERT_SCRIPT" << 'CONVERT_EOF'
 #!/bin/bash
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=7-00:00:00
 
 set -euo pipefail
-export PATH="/camp/home/yipy/.pixi/bin:\$PATH"
+export PATH="/camp/home/yipy/.pixi/bin:$PATH"
 
-# Run from the project root so relative paths resolve correctly
-cd ${DRUGCLIP_ROOT}
-
-CHUNK_DIR="$1"
-LMDB_DIR="$2"
+# $1=DRUGCLIP_ROOT $2=CHUNK_DIR $3=LMDB_DIR
+cd "$1"
+CHUNK_DIR="$2"
+LMDB_DIR="$3"
 
 CHUNK_FILE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "${CHUNK_DIR}/manifest.txt")
 CHUNK_BASE=$(basename "$CHUNK_FILE")
@@ -259,7 +258,7 @@ CONVERT_JOB=$(sbatch \
     --partition="$PARTITION" \
     --array="0-${LAST_CHUNK_IDX}%${MAX_PARALLEL}" \
     --output="${JOBS_DIR}/logs/convert_%A_%a.log" \
-    "$CONVERT_SCRIPT" "$CHUNK_DIR" "$LMDB_DIR")
+    "$CONVERT_SCRIPT" "$DRUGCLIP_ROOT" "$CHUNK_DIR" "$LMDB_DIR")
 
 echo "  Submitted conversion array: job $CONVERT_JOB (${N_CHUNKS} tasks)"
 
@@ -272,7 +271,7 @@ echo "[Stage 4/5] Submitting encoding jobs (depends on Stage 3)..."
 mkdir -p "$EMB_DIR"
 
 ENCODE_SCRIPT="${JOB_DIR}/encode_chunk.sh"
-cat > "$ENCODE_SCRIPT" << ENCODE_EOF
+cat > "$ENCODE_SCRIPT" << 'ENCODE_EOF'
 #!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
@@ -280,14 +279,13 @@ cat > "$ENCODE_SCRIPT" << ENCODE_EOF
 #SBATCH --time=7-00:00:00
 
 set -euo pipefail
-export PATH="/camp/home/yipy/.pixi/bin:\$PATH"
+export PATH="/camp/home/yipy/.pixi/bin:$PATH"
 
-# Run from the project root so relative paths resolve correctly
-cd ${DRUGCLIP_ROOT}
-
-LMDB_DIR="$1"
-EMB_DIR="$2"
-CHUNK_SIZE="$3"
+# $1=DRUGCLIP_ROOT $2=LMDB_DIR $3=EMB_DIR $4=CHUNK_SIZE
+cd "$1"
+LMDB_DIR="$2"
+EMB_DIR="$3"
+CHUNK_SIZE="$4"
 
 # Find the LMDB for this array task
 LMDB_FILES=($(ls -1 "${LMDB_DIR}"/chunk_*.lmdb 2>/dev/null | sort))
@@ -302,7 +300,6 @@ fi
 
 mkdir -p "$CHUNK_EMB_DIR"
 
-# Encode using all 6 folds
 pixi run python ./unimol/encode_mols.py \
     --user-dir ./unimol ./dict \
     --valid-subset test \
@@ -331,7 +328,7 @@ ENCODE_JOB=$(sbatch \
     --array="0-${LAST_CHUNK_IDX}%${MAX_PARALLEL}" \
     --dependency="aftercorr:${CONVERT_JOB}" \
     --output="${JOBS_DIR}/logs/encode_%A_%a.log" \
-    "$ENCODE_SCRIPT" "$LMDB_DIR" "$EMB_DIR" "$CHUNK_SIZE")
+    "$ENCODE_SCRIPT" "$DRUGCLIP_ROOT" "$LMDB_DIR" "$EMB_DIR" "$CHUNK_SIZE")
 
 echo "  Submitted encoding array: job $ENCODE_JOB (${N_CHUNKS} tasks, depends on $CONVERT_JOB)"
 
