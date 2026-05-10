@@ -242,8 +242,20 @@ CHUNK_NAME="${CHUNK_BASE%.*}"
 OUTPUT="${LMDB_DIR}/${CHUNK_NAME}.lmdb"
 
 if [ -f "$OUTPUT" ]; then
-    echo "LMDB already exists: $OUTPUT (skipping)"
-    exit 0
+    # Verify the LMDB is non-empty before skipping
+    ENTRIES=$(pixi run python -c "
+import lmdb
+env = lmdb.open('$OUTPUT', readonly=True, lock=False, subdir=False)
+with env.begin() as txn:
+    print(txn.stat()['entries'])
+" 2>/dev/null || echo 0)
+    if [ "$ENTRIES" -gt 0 ] 2>/dev/null; then
+        echo "LMDB already exists with $ENTRIES entries: $OUTPUT (skipping)"
+        exit 0
+    else
+        echo "LMDB exists but is empty, re-converting: $OUTPUT"
+        rm -f "$OUTPUT"
+    fi
 fi
 
 pixi run python utils/sdf_to_mol_lmdb.py \
