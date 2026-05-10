@@ -100,9 +100,7 @@ module load GCC/13.2.0
 module load CUDA/12.1.1
 module load AutoDock-GPU/1.5.3-CUDA
 
-# AutoDockTools uses pixi — ensure it's on PATH before loading the module
-export PATH="/camp/home/yipy/.pixi/bin:$PATH"
-module load AutoDockTools/0.1.0
+# AutoDockTools scripts called directly via pixi run python (no module needed)
 
 RESULTS_DIR="${JOB_DIR}/docking_results"
 mkdir -p "$RESULTS_DIR"
@@ -143,7 +141,7 @@ with open(smi_file) as f:
             pdb = os.path.join(td, 'lig.pdb')
             pdbqt = os.path.join(td, 'lig.pdbqt')
             Chem.MolToPDBFile(mol, pdb)
-            r = subprocess.run(['prepare_ligand4',
+            r = subprocess.run(['pixi', 'run', 'python', '/nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_ligand4.py',
                                 '-l', pdb, '-o', pdbqt, '-A', 'hydrogens'],
                                capture_output=True, text=True, timeout=60)
             if r.returncode != 0 or not os.path.exists(pdbqt):
@@ -171,7 +169,7 @@ RECEPTOR_PDBQT="${JOB_DIR}/receptor.pdbqt"
 echo ""
 echo "[Step 2/4] Preparing receptor PDBQT..."
 
-prepare_receptor4 \
+pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_receptor4.py \
     -r "$RECEPTOR_PDB" \
     -o "$RECEPTOR_PDBQT" \
     -A hydrogens \
@@ -192,7 +190,7 @@ mkdir -p "$GRID_DIR"
 GPF="${GRID_DIR}/receptor.gpf"
 NPTS=$(python3 -c "import math; n=int(math.ceil($BOX_SIZE/0.375)); print(n if n%2==0 else n+1)")
 
-prepare_gpf4 \
+pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_gpf4.py \
     -r "$RECEPTOR_PDBQT" \
     -l "$LIGANDS_PDBQT" \
     -o "$GPF" \
@@ -213,7 +211,7 @@ echo ""
 echo "[Step 4/4] Running AutoDock-GPU..."
 
 DPF="${JOB_DIR}/docking.dpf"
-prepare_dpf42 \
+pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_dpf42.py \
     -r "$RECEPTOR_PDBQT" \
     -l "$LIGANDS_PDBQT" \
     -o "$DPF" \
