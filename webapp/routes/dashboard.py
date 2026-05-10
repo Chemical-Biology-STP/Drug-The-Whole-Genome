@@ -28,4 +28,15 @@ def index():
     else:
         jobs = job_store.get_jobs_for_user(email)
 
-    return render_template("dashboard.html", jobs=jobs, current_user=email)
+    # Also load docking jobs
+    import os
+    from webapp.services.docking_store import DockingStore
+    docking_store_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "docking_jobs.json")
+    docking_store = DockingStore(docking_store_path)
+    if email.lower() == ADMIN_EMAIL.lower():
+        docking_jobs = docking_store.get_all()
+    else:
+        docking_jobs = docking_store.get_for_user(email)
+
+    return render_template("dashboard.html", jobs=jobs, docking_jobs=docking_jobs,
+                           current_user=email)
