@@ -26,6 +26,10 @@ axel = ">=2.17.13,<3"
 # needs torch at build time.  Run:
 #   pixi run pip install git+https://github.com/dptech-corp/Uni-Core.git --no-build-isolation
 
+# AutoDockTools_py3 (includes MolKit) for receptor/ligand PDBQT preparation
+# Install manually after `pixi install`:
+#   pixi run pip install git+https://github.com/Valdes-Tresanco-MS/AutoDockTools_py3.git
+
 # Core ML
 lightning = "==2.2.0rc0"
 torchmetrics = "*"
