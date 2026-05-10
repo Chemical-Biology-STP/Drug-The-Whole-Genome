@@ -265,7 +265,33 @@ def main():
         txn.put(b"__source_hash__", source_hash.encode("ascii"))
 
     env.close()
-    print(f"Wrote {count} molecules to {args.output}")
+
+    # --- Validate: verify every entry can be unpickled ---
+    print("Validating LMDB entries...")
+    env = lmdb.open(args.output, subdir=False, readonly=True, lock=False)
+    bad_keys = []
+    with env.begin() as txn:
+        cursor = txn.cursor()
+        for key, value in cursor.iternext_dup() if False else cursor.iternext():
+            if key in (b"__content_hash__", b"__source_hash__"):
+                continue
+            try:
+                pickle.loads(value)
+            except Exception:
+                bad_keys.append(key)
+    env.close()
+
+    if bad_keys:
+        print(f"Warning: {len(bad_keys)} corrupt entries found, removing them...")
+        env = lmdb.open(args.output, subdir=False, map_size=map_size)
+        with env.begin(write=True) as txn:
+            for key in bad_keys:
+                txn.delete(key)
+        env.close()
+        count -= len(bad_keys)
+        print(f"Removed {len(bad_keys)} corrupt entries. Final count: {count}")
+    else:
+        print("All entries validated successfully.")
     print(f"Content hash: {digest}")
     print(f"Source hash:  {source_hash}")
 
