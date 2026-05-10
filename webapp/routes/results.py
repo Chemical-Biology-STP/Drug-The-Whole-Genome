@@ -53,8 +53,19 @@ def view(job_id: str):
         page = 1
     pagination = paginate(results, page, RESULTS_PER_PAGE)
 
+    # Auto-detect docking centre from screening params
+    from types import SimpleNamespace
+    params = record.params
+    method = params.get("binding_site_method", "")
+    cx = cy = cz = None
+    if method == "center":
+        cx = params.get("center_x")
+        cy = params.get("center_y")
+        cz = params.get("center_z")
+    docking_centre = SimpleNamespace(x=cx, y=cy, z=cz)
+
     return render_template("results.html", job=record, pagination=pagination,
-                           current_user=email)
+                           current_user=email, docking_centre=docking_centre)
 
 
 @results_bp.route("/<job_id>/results/centre", methods=["GET"])
