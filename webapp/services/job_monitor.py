@@ -176,10 +176,15 @@ class JobMonitor:
         if not statuses:
             return "RUNNING"  # no children visible in SLURM yet
 
+        if any(s in ("FAILED", "TIMEOUT") for s in statuses):
+            return "FAILED"
+        if any(s == "CANCELLED" for s in statuses):
+            # CANCELLED could be DependencyNeverSatisfied — check if any sibling failed
+            # If nothing else is running/pending, treat as failed
+            if not any(s in ("PENDING", "RUNNING", "COMPLETED") for s in statuses):
+                return "FAILED"
         if any(s in ("PENDING", "RUNNING") for s in statuses):
             return "RUNNING"
-        if any(s in ("FAILED", "TIMEOUT", "CANCELLED") for s in statuses):
-            return "FAILED"
         if all(s == "COMPLETED" for s in statuses):
             return "COMPLETED"
         return "RUNNING"
