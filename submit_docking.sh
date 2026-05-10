@@ -85,7 +85,19 @@ elif [ -f /usr/share/lmod/lmod/init/bash ]; then
     source /usr/share/lmod/lmod/init/bash
 fi
 export LMOD_IGNORE_CACHE=1
+
+# Add system EasyBuild modules (GCC, CUDA etc.)
+if [ -d /flask/apps/eb/modules/all ]; then
+    module use /flask/apps/eb/modules/all
+else
+    module use /flask/apps/eb/modules 2>/dev/null || true
+fi
+
+# Add ChemBio STP custom modules
 module use /nemo/stp/chemicalbiology/home/shared/easybuild/modules/all
+
+module load GCC/13.2.0
+module load CUDA/12.1.1
 module load AutoDock-GPU/1.5.3-CUDA
 
 # AutoDockTools uses pixi — ensure it's on PATH before loading the module
