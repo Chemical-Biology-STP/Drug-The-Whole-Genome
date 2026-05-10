@@ -175,7 +175,8 @@ if [ -f "$MOL_LMDB" ]; then
 else
     echo ""
     echo "[Step 2/3] Converting compound library to LMDB..."
-    python utils/sdf_to_mol_lmdb.py --input "$LIBRARY_FILE" --output "$MOL_LMDB"fi
+    python utils/sdf_to_mol_lmdb.py --input "$LIBRARY_FILE" --output "$MOL_LMDB"
+fi
 
 # ---------------------------------------------------------------------------
 # Step 3: Run screening
