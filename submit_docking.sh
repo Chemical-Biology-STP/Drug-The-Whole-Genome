@@ -86,8 +86,11 @@ elif [ -f /usr/share/lmod/lmod/init/bash ]; then
 fi
 export LMOD_IGNORE_CACHE=1
 module use /nemo/stp/chemicalbiology/home/shared/easybuild/modules/all
-module load AutoDockTools/0.1.0
 module load AutoDock-GPU/1.5.3-CUDA
+
+# AutoDockTools uses pixi — ensure it's on PATH before loading the module
+export PATH="/camp/home/yipy/.pixi/bin:$PATH"
+module load AutoDockTools/0.1.0
 
 RESULTS_DIR="${JOB_DIR}/docking_results"
 mkdir -p "$RESULTS_DIR"
