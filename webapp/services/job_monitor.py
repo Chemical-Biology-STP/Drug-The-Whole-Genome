@@ -82,8 +82,25 @@ class JobMonitor:
             if missing_ids:
                 sacct_results = self._slurm_client.sacct(missing_ids)
                 for e in sacct_results:
-                    if "." not in e["job_id"]:
-                        sacct_map[e["job_id"]] = e["state"]
+                    raw_id = e["job_id"]
+                    # Strip array task suffix (e.g. "46384818_0" → "46384818")
+                    # and sub-job suffix (e.g. "46384818.batch" → skip)
+                    if "." in raw_id:
+                        continue
+                    base_id = raw_id.split("_")[0]
+                    state = e["state"]
+                    if state.startswith("CANCELLED"):
+                        state = "CANCELLED"
+                    # Keep the worst state seen for this base job ID
+                    existing = sacct_map.get(base_id)
+                    if existing is None:
+                        sacct_map[base_id] = state
+                    else:
+                        # Priority: FAILED > TIMEOUT > CANCELLED > COMPLETED > RUNNING > PENDING
+                        priority = {"FAILED": 6, "TIMEOUT": 5, "CANCELLED": 4,
+                                    "COMPLETED": 3, "RUNNING": 2, "PENDING": 1}
+                        if priority.get(state, 0) > priority.get(existing, 0):
+                            sacct_map[base_id] = state
 
             now = datetime.now(timezone.utc).isoformat()
 
