@@ -192,8 +192,9 @@ class JobSubmissionService:
         if out is None:
             raise SlurmError(command=cmd, return_code=None, stderr=err or "")
 
-        # Parse only "Submitted batch job NNNNN" lines — ignore other numbers in output
-        child_job_ids = re.findall(r"Submitted batch job (\d+)", out)
+        # Parse job IDs from lines containing "job NNNNN" or "Submitted batch job NNNNN"
+        # sbatch --parsable outputs bare IDs; the echo lines say "job 46396237"
+        child_job_ids = re.findall(r"(?:job|Submitted batch job)\s+(\d{5,})", out)
         # Deduplicate while preserving order
         seen: set[str] = set()
         unique_child_ids: list[str] = []
