@@ -48,16 +48,18 @@ def view(job_id: str):
 
     # For large-scale jobs, build a structured progress view from all child logs
     if record.child_job_ids:
-        # Build one shell command that does ls + tail in a single SSH connection
-        child_greps = " ".join(
-            f"_{cid}_\\|_{cid}\\.log" for cid in record.child_job_ids
-        )
+        # Build a single SSH command: find matching log files and tail each one.
+        # Construct the grep pattern in Python so there's no shell quoting issue.
+        id_pattern = "|".join(record.child_job_ids)  # e.g. "46425242|46425243"
+        logs_dir = f"{REMOTE_JOBS_DIR}/logs"
         cmd = (
-            f"cd {REMOTE_JOBS_DIR}/logs && "
-            f"for f in $(ls 2>/dev/null | grep -E "
-            f"'(convert|encode|screen)' | grep -E "
-            f"'({'|'.join(record.child_job_ids)})' | sort); do "
-            f"echo \"=== $f ===\"; tail -n 15 \"$f\"; echo; done"
+            f"cd {logs_dir} 2>/dev/null && "
+            f"for f in $(ls 2>/dev/null"
+            f" | grep -E '(convert|encode|screen)'"
+            f" | grep -E '{id_pattern}'"
+            f" | sort); do"
+            f" echo \"=== $f ===\"; tail -n 15 \"$f\"; echo;"
+            f" done"
         )
         out, _ = server.run_command(cmd)
         if out and out.strip():
