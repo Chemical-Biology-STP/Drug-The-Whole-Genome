@@ -245,8 +245,8 @@ document.addEventListener('DOMContentLoaded', function() {
     fetchLog();
 
     {% if job.status == 'RUNNING' %}
-    // Auto-refresh every 30 seconds while running
-    autoRefreshInterval = setInterval(fetchLog, 30000);
+    // Auto-refresh every 2 minutes while running (SSH budget is limited)
+    autoRefreshInterval = setInterval(fetchLog, 120000);
     {% endif %}
 });
 </script>

@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 class SafetyMonitor:
     MAX_SSH_PER_MINUTE = 20
-    MAX_SSH_PER_5MIN   = 50
-    MAX_SSH_PER_HOUR   = 200
+    MAX_SSH_PER_5MIN   = 60
+    MAX_SSH_PER_HOUR   = 400
 
     def __init__(self, app_name: str = "drugclip", check_interval: int = 30):
         self.app_name = app_name
