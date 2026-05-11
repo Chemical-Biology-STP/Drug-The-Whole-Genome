@@ -242,19 +242,30 @@ CHUNK_NAME="${CHUNK_BASE%.*}"
 OUTPUT="${LMDB_DIR}/${CHUNK_NAME}.lmdb"
 
 if [ -f "$OUTPUT" ]; then
-    # Verify the LMDB is non-empty before skipping
-    ENTRIES=$(pixi run python -c "
-import lmdb
-env = lmdb.open('$OUTPUT', readonly=True, lock=False, subdir=False)
-with env.begin() as txn:
-    print(txn.stat()['entries'])
-" 2>/dev/null || echo 0)
-    if [ "$ENTRIES" -gt 0 ] 2>/dev/null; then
-        echo "LMDB already exists with $ENTRIES entries: $OUTPUT (skipping)"
+    # Verify the LMDB is non-empty AND the last entry is readable (not corrupt)
+    LMDB_OK=$(pixi run python -c "
+import lmdb, pickle, sys
+try:
+    env = lmdb.open('$OUTPUT', readonly=True, lock=False, subdir=False)
+    with env.begin() as txn:
+        n = txn.stat()['entries']
+        if n == 0:
+            print('empty')
+            sys.exit(0)
+        # Try to unpickle the last entry to catch corruption
+        cursor = txn.cursor()
+        cursor.last()
+        pickle.loads(cursor.value())
+        print(n)
+except Exception as e:
+    print('corrupt:' + str(e))
+" 2>/dev/null || echo "error")
+    if [[ "$LMDB_OK" =~ ^[0-9]+$ ]] && [ "$LMDB_OK" -gt 0 ]; then
+        echo "LMDB already exists with $LMDB_OK entries (verified): $OUTPUT (skipping)"
         exit 0
     else
-        echo "LMDB exists but is empty, re-converting: $OUTPUT"
-        rm -f "$OUTPUT"
+        echo "LMDB exists but is invalid ($LMDB_OK), re-converting: $OUTPUT"
+        rm -f "$OUTPUT" "${OUTPUT}-lock"
     fi
 fi
 
