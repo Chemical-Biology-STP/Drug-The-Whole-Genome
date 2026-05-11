@@ -23,10 +23,10 @@ class RemoteServer:
         except Exception:
             pass
 
-        ssh_cmd = f"ssh {self.user}@{self.host} '{command}'"
         try:
             result = subprocess.run(
-                ssh_cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+                ["ssh", f"{self.user}@{self.host}", command],
+                capture_output=True, text=True, timeout=timeout,
             )
             if result.returncode == 0:
                 return result.stdout.strip(), None
