@@ -128,6 +128,16 @@ class DockingSubmissionService:
         ligands_pdbqt_local = os.path.join(local_tmp, "ligands_input.pdbqt")
         remote_ligands = f"{remote_job_dir}/ligands_input.pdbqt"  # default; overridden on fallback
 
+        # Always write a ligands.smi file — the HPC script uses it to map SMILES→rank
+        smiles_path = os.path.join(local_tmp, "ligands.smi")
+        with open(smiles_path, "w") as f:
+            for rank, smiles, score in selected_compounds:
+                f.write(f"{smiles} rank_{rank}\n")
+        remote_smiles = f"{remote_job_dir}/ligands.smi"
+        ok, err = server.upload_file(smiles_path, remote_smiles)
+        if not ok:
+            raise RuntimeError(f"Failed to upload SMILES file: {err}")
+
         try:
             pdbqt_bytes, n_ok, n_fail = _smiles_to_pdbqt_local(selected_compounds)
             if n_ok == 0:
@@ -138,17 +148,8 @@ class DockingSubmissionService:
                 f.write(pdbqt_bytes)
             n_compounds = n_ok
         except Exception as e:
-            # Fall back: write SMILES file and let HPC script convert
+            # Fall back: let HPC script convert from SMILES
             logger.warning("Local PDBQT conversion failed (%s), falling back to SMILES file", e)
-            smiles_path = os.path.join(local_tmp, "ligands.smi")
-            with open(smiles_path, "w") as f:
-                for rank, smiles, score in selected_compounds:
-                    f.write(f"{smiles} rank_{rank}\n")
-            # Upload SMILES instead; submit_docking.sh will handle conversion on HPC
-            remote_smiles = f"{remote_job_dir}/ligands.smi"
-            ok, err = server.upload_file(smiles_path, remote_smiles)
-            if not ok:
-                raise RuntimeError(f"Failed to upload SMILES file: {err}")
             ligands_pdbqt_local = None
             n_compounds = len(selected_compounds)
             remote_ligands = remote_smiles  # pass the .smi file to the script

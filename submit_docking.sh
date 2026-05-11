@@ -31,7 +31,7 @@
 #   receptor.pdbqt          — prepared receptor
 #   docking_results/        — per-compound best-pose PDBQT files
 #   summary.csv             — drugclip_rank, smiles, docking_score_kcal_mol, result_stem
-#   slurm_<id>.log          — SLURM log (symlinked from jobs/logs/)
+#   slurm_<id>.log          — SLURM log
 # ============================================================================
 
 set -euo pipefail
@@ -100,8 +100,6 @@ module load GCC/13.2.0
 module load CUDA/12.1.1
 module load AutoDock-GPU/1.5.3-CUDA
 
-# AutoDockTools scripts called directly via pixi run python (no module needed)
-
 RESULTS_DIR="${JOB_DIR}/docking_results"
 mkdir -p "$RESULTS_DIR"
 
@@ -110,7 +108,7 @@ mkdir -p "$RESULTS_DIR"
 # ---------------------------------------------------------------------------
 if [[ "$LIGANDS_FILE" == *.smi ]]; then
     echo ""
-    echo "[Step 1/4] Converting SMILES to PDBQT..."
+    echo "[Step 1/5] Converting SMILES to PDBQT..."
     LIGANDS_PDBQT="${JOB_DIR}/ligands_input.pdbqt"
     pixi run python - "$LIGANDS_FILE" "$LIGANDS_PDBQT" << 'PYEOF'
 import sys, os, subprocess, tempfile
@@ -156,7 +154,7 @@ print(f'Converted {n_ok} ligands ({n_fail} failed)')
 PYEOF
 else
     echo ""
-    echo "[Step 1/4] Ligand PDBQT already provided — skipping conversion"
+    echo "[Step 1/5] Ligand PDBQT already provided — skipping conversion"
     LIGANDS_PDBQT="$LIGANDS_FILE"
 fi
 
@@ -165,7 +163,7 @@ fi
 # ---------------------------------------------------------------------------
 RECEPTOR_PDBQT="${JOB_DIR}/receptor.pdbqt"
 echo ""
-echo "[Step 2/4] Preparing receptor PDBQT..."
+echo "[Step 2/5] Preparing receptor PDBQT..."
 
 pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_receptor4.py \
     -r "$RECEPTOR_PDB" \
@@ -176,23 +174,94 @@ pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Uti
 echo "  Receptor PDBQT: $RECEPTOR_PDBQT"
 
 # ---------------------------------------------------------------------------
-# Step 3: Generate AutoDock-GPU grid maps
+# Step 3: Split multi-ligand PDBQT into individual files
 # ---------------------------------------------------------------------------
 echo ""
-echo "[Step 3/4] Generating grid maps..."
+echo "[Step 3/5] Splitting ligands into individual PDBQT files..."
+
+LIGANDS_DIR="${JOB_DIR}/ligands"
+mkdir -p "$LIGANDS_DIR"
+
+# Read the ligands.smi to get rank→smiles mapping (most reliable source of rank info)
+SMI_FILE="${JOB_DIR}/ligands.smi"
+
+pixi run python - "$LIGANDS_PDBQT" "$SMI_FILE" "$LIGANDS_DIR" << 'PYEOF'
+import sys, os, re
+
+pdbqt_file = sys.argv[1]
+smi_file   = sys.argv[2]
+out_dir    = sys.argv[3]
+
+# Build smiles→rank mapping from the .smi file (if it exists)
+smiles_to_rank = {}
+if os.path.exists(smi_file):
+    with open(smi_file) as f:
+        for line in f:
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                smi = parts[0]
+                name = parts[1]  # e.g. "rank_1"
+                m = re.match(r'rank_(\d+)', name)
+                if m:
+                    smiles_to_rank[smi] = int(m.group(1))
+
+# Split the multi-ligand PDBQT into individual files.
+# Each ligand block starts with REMARK SMILES= and ends with TORSDOF.
+blocks = []
+current_lines = []
+current_smiles = None
+
+with open(pdbqt_file) as f:
+    for line in f:
+        if line.startswith('REMARK SMILES='):
+            # Start of a new ligand block
+            if current_lines and current_smiles is not None:
+                blocks.append((current_smiles, current_lines))
+            current_smiles = line.strip().split('=', 1)[1]
+            current_lines = [line]
+        elif current_smiles is not None:
+            current_lines.append(line)
+            if line.startswith('TORSDOF'):
+                blocks.append((current_smiles, current_lines))
+                current_smiles = None
+                current_lines = []
+
+# Write each block to its own file
+for i, (smiles, lines) in enumerate(blocks):
+    rank = smiles_to_rank.get(smiles, i + 1)
+    out_path = os.path.join(out_dir, f'rank_{rank}.pdbqt')
+    with open(out_path, 'w') as f:
+        f.writelines(lines)
+    print(f'  rank_{rank}: {smiles[:60]}')
+
+print(f'Split {len(blocks)} ligands into {out_dir}')
+PYEOF
+
+# ---------------------------------------------------------------------------
+# Step 4: Generate AutoDock-GPU grid maps (once, shared by all ligands)
+# ---------------------------------------------------------------------------
+echo ""
+echo "[Step 4/5] Generating grid maps..."
 
 GRID_DIR="${JOB_DIR}/grid"
 mkdir -p "$GRID_DIR"
 
-# Write GPF (grid parameter file)
-GPF="${GRID_DIR}/receptor.gpf"
 NPTS=$(python3 -c "import math; n=int(math.ceil($BOX_SIZE/0.375)); print(n if n%2==0 else n+1)")
+
+# Use the first ligand file for GPF generation
+FIRST_LIGAND=$(ls "${LIGANDS_DIR}"/rank_*.pdbqt 2>/dev/null | sort -V | head -1)
+if [ -z "$FIRST_LIGAND" ]; then
+    echo "ERROR: No ligand PDBQT files found in $LIGANDS_DIR"
+    exit 1
+fi
+
+GPF="${GRID_DIR}/receptor.gpf"
 
 # Run prepare_gpf4 from the job directory so MolKit can find files by relative path
 cd "$JOB_DIR"
 pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_gpf4.py \
     -r "$RECEPTOR_PDBQT" \
-    -l "$LIGANDS_PDBQT" \
+    -l "$FIRST_LIGAND" \
     -o "$GPF" \
     -p npts="${NPTS},${NPTS},${NPTS}" \
     -p gridcenter="${CENTER_X},${CENTER_Y},${CENTER_Z}"
@@ -206,107 +275,103 @@ cd "$DRUGCLIP_ROOT"
 echo "  Grid maps generated in $GRID_DIR"
 
 # ---------------------------------------------------------------------------
-# Step 4: Run AutoDock-GPU
+# Step 5: Run AutoDock-GPU for each ligand individually, parse results
 # ---------------------------------------------------------------------------
 echo ""
-echo "[Step 4/4] Running AutoDock-GPU..."
+echo "[Step 5/5] Running AutoDock-GPU and parsing results..."
 
-DPF="${JOB_DIR}/docking.dpf"
-cd "$JOB_DIR"
-pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_dpf42.py \
-    -r "$RECEPTOR_PDBQT" \
-    -l "$LIGANDS_PDBQT" \
-    -o "$DPF" \
-    -p ga_num_evals=2500000 \
-    -p ga_run="$NRUN"
-cd "$DRUGCLIP_ROOT"
+SUMMARY_FILE="${JOB_DIR}/summary.csv"
+echo "drugclip_rank,smiles,docking_score_kcal_mol,result_stem" > "$SUMMARY_FILE"
 
-autodock_gpu_128wi \
-    --ffile "${JOB_DIR}/receptor.maps.fld" \
-    --lfile "$LIGANDS_PDBQT" \
-    --nrun "$NRUN" \
-    --resnam "${RESULTS_DIR}/" \
-    --xmloutput 0
+for LIGAND_PDBQT in $(ls "${LIGANDS_DIR}"/rank_*.pdbqt 2>/dev/null | sort -V); do
+    STEM=$(basename "$LIGAND_PDBQT" .pdbqt)   # e.g. "rank_1"
+    RANK="${STEM#rank_}"
+    DLG_OUT="${RESULTS_DIR}/${STEM}"
 
-# ---------------------------------------------------------------------------
-# Step 5: Parse results → summary.csv
-# ---------------------------------------------------------------------------
-echo ""
-echo "[Step 5/5] Parsing docking results..."
+    echo "  Docking $STEM ..."
 
-python3 - << PYEOF
-import os, csv, re, glob
+    autodock_gpu_128wi \
+        --ffile "${JOB_DIR}/receptor.maps.fld" \
+        --lfile "$LIGAND_PDBQT" \
+        --nrun "$NRUN" \
+        --resnam "${DLG_OUT}" \
+        --xmloutput 0
 
-results_dir = "${RESULTS_DIR}"
-summary_path = "${JOB_DIR}/summary.csv"
+    # Parse the DLG to find the best pose (lowest energy)
+    DLG_FILE="${DLG_OUT}.dlg"
+    if [ ! -f "$DLG_FILE" ]; then
+        echo "  WARNING: No DLG file found for $STEM, skipping"
+        continue
+    fi
 
-rows = []
-for dlg in sorted(glob.glob(os.path.join(results_dir, "*.dlg"))):
-    stem = os.path.splitext(os.path.basename(dlg))[0]
-    # Parse rank and SMILES from REMARK in the corresponding PDBQT
-    pdbqt_src = "${LIGANDS_PDBQT}"
-    rank = None
-    smiles = None
-    with open(pdbqt_src) as f:
-        for line in f:
-            if line.startswith("REMARK DrugCLIP"):
-                m = re.search(r"rank=(\d+)", line)
-                if m: rank = int(m.group(1))
-            elif line.startswith("REMARK SMILES="):
-                smiles = line.strip().split("=", 1)[1]
-            elif line.startswith("ROOT") and rank is not None:
-                break
+    pixi run python - "$DLG_FILE" "$LIGAND_PDBQT" "$RESULTS_DIR" "$STEM" "$RANK" << 'PYEOF'
+import sys, os, re, csv
 
-    # Parse best binding energy from DLG
-    best_energy = None
-    with open(dlg) as f:
-        for line in f:
-            if "DOCKED: USER    Estimated Free Energy of Binding" in line:
-                m = re.search(r"=\s*([-\d.]+)", line)
-                if m:
-                    best_energy = float(m.group(1))
-                    break
+dlg_file    = sys.argv[1]
+ligand_pdbqt = sys.argv[2]
+results_dir = sys.argv[3]
+stem        = sys.argv[4]
+rank        = int(sys.argv[5])
 
-    if best_energy is not None:
-        # Write best pose PDBQT
-        best_pdbqt = os.path.join(results_dir, f"{stem}-best.pdbqt")
-        in_best = False
-        lines = []
-        with open(dlg) as f:
-            for line in f:
-                if "DOCKED: MODEL        1" in line:
-                    in_best = True
-                if in_best:
-                    if line.startswith("DOCKED: "):
-                        pdb_line = line[8:]
-                        if pdb_line.strip() == "ENDMDL":
-                            break
-                        lines.append(pdb_line)
-        if lines:
-            header = ""
-            if smiles:
-                header = f"REMARK SMILES={smiles}\n"
-            if rank:
-                header = f"REMARK DrugCLIP rank={rank} score=0\n" + header
-            with open(best_pdbqt, "w") as f:
-                f.write(header + "".join(lines))
+# Get SMILES from the ligand PDBQT
+smiles = ''
+with open(ligand_pdbqt) as f:
+    for line in f:
+        if line.startswith('REMARK SMILES='):
+            smiles = line.strip().split('=', 1)[1]
+            break
 
-        rows.append({
-            "drugclip_rank": rank or stem,
-            "smiles": smiles or "",
-            "docking_score_kcal_mol": best_energy,
-            "result_stem": stem,
-        })
+# Parse DLG: find the MODEL with the lowest binding energy
+best_energy = None
+best_pose_lines = []
 
-rows.sort(key=lambda r: r["docking_score_kcal_mol"])
+current_energy = None
+current_lines = []
+in_model = False
 
-with open(summary_path, "w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=["drugclip_rank", "smiles", "docking_score_kcal_mol", "result_stem"])
-    writer.writeheader()
-    writer.writerows(rows)
+with open(dlg_file) as f:
+    for line in f:
+        if 'DOCKED: MODEL' in line:
+            in_model = True
+            current_energy = None
+            current_lines = []
+        elif in_model and 'Estimated Free Energy of Binding' in line:
+            m = re.search(r'=\s*([-+]?\d+\.?\d*)', line)
+            if m:
+                current_energy = float(m.group(1))
+        elif in_model and line.startswith('DOCKED: '):
+            pdb_line = line[8:]  # strip 'DOCKED: ' prefix
+            if pdb_line.strip() == 'ENDMDL':
+                # End of model — check if this is the best
+                if current_energy is not None:
+                    if best_energy is None or current_energy < best_energy:
+                        best_energy = current_energy
+                        best_pose_lines = list(current_lines)
+                in_model = False
+            else:
+                current_lines.append(pdb_line)
 
-print(f"Wrote {len(rows)} docking results to {summary_path}")
+if best_energy is None:
+    print(f'  WARNING: No valid poses found in {dlg_file}')
+    sys.exit(0)
+
+# Write best-pose PDBQT
+best_pdbqt = os.path.join(results_dir, f'{stem}-best.pdbqt')
+with open(best_pdbqt, 'w') as f:
+    f.write(f'REMARK SMILES={smiles}\n')
+    f.writelines(best_pose_lines)
+
+# Append to summary CSV
+summary_path = os.path.join(os.path.dirname(results_dir), 'summary.csv')
+with open(summary_path, 'a', newline='') as f:
+    import csv
+    writer = csv.writer(f)
+    writer.writerow([rank, smiles, best_energy, stem])
+
+print(f'  {stem}: best energy = {best_energy:.2f} kcal/mol → {best_pdbqt}')
 PYEOF
+
+done
 
 echo ""
 echo "============================================"
