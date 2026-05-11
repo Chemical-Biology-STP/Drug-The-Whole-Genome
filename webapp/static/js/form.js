@@ -140,17 +140,21 @@ document.addEventListener('DOMContentLoaded', function () {
         hpcPanel.classList.add('d-none');
         if (savedPanel) savedPanel.classList.add('d-none');
 
-        // Clear all library fields
+        // Clear all library fields and disable inactive ones so they don't submit
         document.getElementById('library_upload_path').value = '';
+
         var hpcInput = document.getElementById('library_hpc_path');
-        if (hpcInput) hpcInput.value = '';
+        if (hpcInput) { hpcInput.value = ''; hpcInput.disabled = true; }
+
         var savedPath = document.getElementById('library_saved_path');
-        if (savedPath) savedPath.value = '';
+        if (savedPath) { savedPath.value = ''; savedPath.disabled = true; }
 
         if (hpcTab.checked) {
             hpcPanel.classList.remove('d-none');
+            if (hpcInput) hpcInput.disabled = false;
         } else if (savedTab && savedTab.checked) {
             if (savedPanel) savedPanel.classList.remove('d-none');
+            if (savedPath) savedPath.disabled = false;
             loadSavedLibraries();
         } else {
             uploadPanel.classList.remove('d-none');
