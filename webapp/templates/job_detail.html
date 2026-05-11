@@ -111,9 +111,11 @@
                     <i class="bi bi-arrow-clockwise me-1"></i>Refresh Log
                 </button>
             </div>
-            <div class="card-body">
-                <div class="log-viewer" id="log-viewer">
-                    <p class="text-muted">Click "Refresh Log" to load the latest log output.</p>
+            <div class="card-body p-0">
+                <div class="log-viewer" id="log-viewer"
+                     style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:0.8em;
+                            padding:1rem;height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;border-radius:0 0 0.375rem 0.375rem;">
+                    <span class="text-muted">Loading log…</span>
                 </div>
             </div>
         </div>
@@ -204,31 +206,48 @@
 document.addEventListener('DOMContentLoaded', function() {
     var refreshBtn = document.getElementById('refresh-log-btn');
     var logViewer = document.getElementById('log-viewer');
+    var autoRefreshInterval = null;
 
-    if (refreshBtn && logViewer) {
-        refreshBtn.addEventListener('click', function() {
+    function fetchLog() {
+        if (refreshBtn) {
             refreshBtn.disabled = true;
             refreshBtn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Loading...';
+        }
 
-            fetch('/jobs/{{ job.job_id }}/log')
-                .then(function(response) {
-                    if (!response.ok) {
-                        throw new Error('Failed to fetch log');
-                    }
-                    return response.json();
-                })
-                .then(function(data) {
+        fetch('/jobs/{{ job.job_id }}/log')
+            .then(function(response) {
+                if (!response.ok) throw new Error('Failed to fetch log');
+                return response.json();
+            })
+            .then(function(data) {
+                if (logViewer) {
                     logViewer.textContent = data.log || 'No log content available.';
-                })
-                .catch(function(error) {
-                    logViewer.textContent = 'Error loading log: ' + error.message;
-                })
-                .finally(function() {
+                    // Auto-scroll to bottom
+                    logViewer.scrollTop = logViewer.scrollHeight;
+                }
+            })
+            .catch(function(error) {
+                if (logViewer) logViewer.textContent = 'Error loading log: ' + error.message;
+            })
+            .finally(function() {
+                if (refreshBtn) {
                     refreshBtn.disabled = false;
                     refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Refresh Log';
-                });
-        });
+                }
+            });
     }
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', fetchLog);
+    }
+
+    // Auto-load immediately on page open
+    fetchLog();
+
+    {% if job.status == 'RUNNING' %}
+    // Auto-refresh every 30 seconds while running
+    autoRefreshInterval = setInterval(fetchLog, 30000);
+    {% endif %}
 });
 </script>
 {% endif %}

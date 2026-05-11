@@ -31,7 +31,7 @@ def view(job_id: str):
     """Return SLURM log file contents as JSON, fetched from the HPC via SSH.
 
     For large-scale jobs the primary job_id has no SLURM log. In that case
-    we concatenate the most recent logs from the child jobs instead.
+    we collect logs from all child array tasks and show a progress summary.
     """
     email = _get_email()
     if not email:
@@ -46,29 +46,54 @@ def view(job_id: str):
     server = RemoteServer(REMOTE_HOST, REMOTE_USER)
     log_content = None
 
-    # Try the primary log path first
-    if record.log_path:
-        out, _ = server.run_command(f"tail -n 200 {record.log_path} 2>/dev/null")
-        if out and out.strip():
-            log_content = out
-
-    # For large-scale jobs (or when primary log is missing), collect child logs
-    if not log_content and record.child_job_ids:
+    # For large-scale jobs, build a structured progress view from all child logs
+    if record.child_job_ids:
         parts = []
+
+        # List all relevant log files once
+        ls_out, _ = server.run_command(f"ls {REMOTE_JOBS_DIR}/logs/ 2>/dev/null")
+        all_logs = [l.strip() for l in (ls_out or "").splitlines() if l.strip()]
+
         for child_id in record.child_job_ids:
-            # Try the per-array log pattern: logs/<prefix>_<array_id>_<task>.log
-            # and the simple pattern: logs/slurm_<id>.log
-            cmd = (
-                f"ls {REMOTE_JOBS_DIR}/logs/ 2>/dev/null"
-                f" | grep -E '^(convert|encode|screen).*{child_id}|slurm_{child_id}'"
-                f" | sort | tail -3"
-                f" | xargs -I{{}} tail -n 50 {REMOTE_JOBS_DIR}/logs/{{}} 2>/dev/null"
-            )
-            out, _ = server.run_command(cmd)
-            if out and out.strip():
-                parts.append(f"=== Child job {child_id} ===\n{out}")
+            # Match convert_<id>_<task>.log, encode_<id>_<task>.log, screen_..._<id>.log
+            matching = sorted([
+                l for l in all_logs
+                if (f"_{child_id}_" in l or l.endswith(f"_{child_id}.log"))
+                and l.endswith(".log")
+            ])
+            if not matching:
+                continue
+
+            # Determine stage label
+            if matching[0].startswith("convert_"):
+                stage = "Stage 3 — Convert to LMDB"
+            elif matching[0].startswith("encode_"):
+                stage = "Stage 4 — Encode embeddings"
+            elif matching[0].startswith("screen_"):
+                stage = "Stage 5 — Screening"
+            else:
+                stage = f"Job {child_id}"
+
+            # Show tail of each task log (last 15 lines each, up to 6 tasks)
+            task_parts = []
+            for logfile in matching[:6]:
+                tail_out, _ = server.run_command(
+                    f"tail -n 15 {REMOTE_JOBS_DIR}/logs/{logfile} 2>/dev/null"
+                )
+                if tail_out and tail_out.strip():
+                    task_parts.append(f"  [{logfile}]\n{tail_out.rstrip()}")
+
+            if task_parts:
+                parts.append(f"{'='*60}\n{stage} (SLURM {child_id})\n{'='*60}\n" +
+                              "\n\n".join(task_parts))
 
         if parts:
             log_content = "\n\n".join(parts)
+
+    # Fallback: try the primary log path (standard / screen job)
+    if not log_content and record.log_path:
+        out, _ = server.run_command(f"tail -n 200 {record.log_path} 2>/dev/null")
+        if out and out.strip():
+            log_content = out
 
     return jsonify({"log": log_content or "Log file not available yet — job may still be starting."})
