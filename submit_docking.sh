@@ -275,103 +275,114 @@ cd "$DRUGCLIP_ROOT"
 echo "  Grid maps generated in $GRID_DIR"
 
 # ---------------------------------------------------------------------------
-# Step 5: Run AutoDock-GPU for each ligand individually, parse results
+# Step 5: Run AutoDock-GPU in batch mode (all ligands in one GPU call)
 # ---------------------------------------------------------------------------
 echo ""
-echo "[Step 5/5] Running AutoDock-GPU and parsing results..."
+echo "[Step 5/5] Running AutoDock-GPU (batch mode) and parsing results..."
 
-SUMMARY_FILE="${JOB_DIR}/summary.csv"
-echo "drugclip_rank,smiles,docking_score_kcal_mol,result_stem" > "$SUMMARY_FILE"
-
+# Build the batch filelist:
+#   Line 1:  receptor maps fld (used for all ligands)
+#   Lines 2+: <ligand.pdbqt> <result_stem>
+BATCH_FILE="${JOB_DIR}/batch.txt"
+echo "${JOB_DIR}/receptor.maps.fld" > "$BATCH_FILE"
 for LIGAND_PDBQT in $(ls "${LIGANDS_DIR}"/rank_*.pdbqt 2>/dev/null | sort -V); do
-    STEM=$(basename "$LIGAND_PDBQT" .pdbqt)   # e.g. "rank_1"
-    RANK="${STEM#rank_}"
-    DLG_OUT="${RESULTS_DIR}/${STEM}"
-
-    echo "  Docking $STEM ..."
-
-    autodock_gpu_128wi \
-        --ffile "${JOB_DIR}/receptor.maps.fld" \
-        --lfile "$LIGAND_PDBQT" \
-        --nrun "$NRUN" \
-        --resnam "${DLG_OUT}" \
-        --xmloutput 0
-
-    # Parse the DLG to find the best pose (lowest energy)
-    DLG_FILE="${DLG_OUT}.dlg"
-    if [ ! -f "$DLG_FILE" ]; then
-        echo "  WARNING: No DLG file found for $STEM, skipping"
-        continue
-    fi
-
-    pixi run python - "$DLG_FILE" "$LIGAND_PDBQT" "$RESULTS_DIR" "$STEM" "$RANK" << 'PYEOF'
-import sys, os, re, csv
-
-dlg_file    = sys.argv[1]
-ligand_pdbqt = sys.argv[2]
-results_dir = sys.argv[3]
-stem        = sys.argv[4]
-rank        = int(sys.argv[5])
-
-# Get SMILES from the ligand PDBQT
-smiles = ''
-with open(ligand_pdbqt) as f:
-    for line in f:
-        if line.startswith('REMARK SMILES='):
-            smiles = line.strip().split('=', 1)[1]
-            break
-
-# Parse DLG: find the MODEL with the lowest binding energy
-best_energy = None
-best_pose_lines = []
-
-current_energy = None
-current_lines = []
-in_model = False
-
-with open(dlg_file) as f:
-    for line in f:
-        if 'DOCKED: MODEL' in line:
-            in_model = True
-            current_energy = None
-            current_lines = []
-        elif in_model and 'Estimated Free Energy of Binding' in line:
-            m = re.search(r'=\s*([-+]?\d+\.?\d*)', line)
-            if m:
-                current_energy = float(m.group(1))
-        elif in_model and line.startswith('DOCKED: '):
-            pdb_line = line[8:]  # strip 'DOCKED: ' prefix
-            if pdb_line.strip() == 'ENDMDL':
-                # End of model — check if this is the best
-                if current_energy is not None:
-                    if best_energy is None or current_energy < best_energy:
-                        best_energy = current_energy
-                        best_pose_lines = list(current_lines)
-                in_model = False
-            else:
-                current_lines.append(pdb_line)
-
-if best_energy is None:
-    print(f'  WARNING: No valid poses found in {dlg_file}')
-    sys.exit(0)
-
-# Write best-pose PDBQT
-best_pdbqt = os.path.join(results_dir, f'{stem}-best.pdbqt')
-with open(best_pdbqt, 'w') as f:
-    f.write(f'REMARK SMILES={smiles}\n')
-    f.writelines(best_pose_lines)
-
-# Append to summary CSV
-summary_path = os.path.join(os.path.dirname(results_dir), 'summary.csv')
-with open(summary_path, 'a', newline='') as f:
-    import csv
-    writer = csv.writer(f)
-    writer.writerow([rank, smiles, best_energy, stem])
-
-print(f'  {stem}: best energy = {best_energy:.2f} kcal/mol → {best_pdbqt}')
-PYEOF
-
+    STEM=$(basename "$LIGAND_PDBQT" .pdbqt)
+    echo "${LIGAND_PDBQT} ${RESULTS_DIR}/${STEM}" >> "$BATCH_FILE"
 done
+
+N_LIGANDS=$(( $(wc -l < "$BATCH_FILE") - 1 ))
+echo "  Batch file: $BATCH_FILE ($N_LIGANDS ligands)"
+
+autodock_gpu_128wi \
+    --filelist "$BATCH_FILE" \
+    --nrun "$NRUN" \
+    --xmloutput 0
+
+echo "  AutoDock-GPU batch complete."
+
+# ---------------------------------------------------------------------------
+# Parse all DLG files → per-ligand best-pose PDBQT + summary.csv
+# ---------------------------------------------------------------------------
+SUMMARY_FILE="${JOB_DIR}/summary.csv"
+
+pixi run python - "$LIGANDS_DIR" "$RESULTS_DIR" "$SUMMARY_FILE" << 'PYEOF'
+import sys, os, re, csv, glob
+
+ligands_dir  = sys.argv[1]
+results_dir  = sys.argv[2]
+summary_path = sys.argv[3]
+
+rows = []
+
+for dlg_file in sorted(glob.glob(os.path.join(results_dir, 'rank_*.dlg'))):
+    stem = os.path.basename(dlg_file)[:-4]          # e.g. "rank_1"
+    rank = int(stem.split('_')[1])
+    ligand_pdbqt = os.path.join(ligands_dir, f'{stem}.pdbqt')
+
+    # Get SMILES from the individual ligand PDBQT
+    smiles = ''
+    if os.path.exists(ligand_pdbqt):
+        with open(ligand_pdbqt) as f:
+            for line in f:
+                if line.startswith('REMARK SMILES='):
+                    smiles = line.strip().split('=', 1)[1]
+                    break
+
+    # Parse DLG: find the MODEL with the lowest binding energy
+    best_energy = None
+    best_pose_lines = []
+    current_energy = None
+    current_lines = []
+    in_model = False
+
+    with open(dlg_file) as f:
+        for line in f:
+            if 'DOCKED: MODEL' in line:
+                in_model = True
+                current_energy = None
+                current_lines = []
+            elif in_model and 'Estimated Free Energy of Binding' in line:
+                m = re.search(r'=\s*([-+]?\d+\.?\d*)', line)
+                if m:
+                    current_energy = float(m.group(1))
+            elif in_model and line.startswith('DOCKED: '):
+                pdb_line = line[8:]
+                if pdb_line.strip() == 'ENDMDL':
+                    if current_energy is not None:
+                        if best_energy is None or current_energy < best_energy:
+                            best_energy = current_energy
+                            best_pose_lines = list(current_lines)
+                    in_model = False
+                else:
+                    current_lines.append(pdb_line)
+
+    if best_energy is None:
+        print(f'  WARNING: No valid poses in {dlg_file}')
+        continue
+
+    # Write best-pose PDBQT
+    best_pdbqt = os.path.join(results_dir, f'{stem}-best.pdbqt')
+    with open(best_pdbqt, 'w') as f:
+        f.write(f'REMARK SMILES={smiles}\n')
+        f.writelines(best_pose_lines)
+
+    rows.append({
+        'drugclip_rank': rank,
+        'smiles': smiles,
+        'docking_score_kcal_mol': best_energy,
+        'result_stem': stem,
+    })
+    print(f'  {stem}: {best_energy:.2f} kcal/mol')
+
+rows.sort(key=lambda r: r['docking_score_kcal_mol'])
+
+with open(summary_path, 'w', newline='') as f:
+    writer = csv.DictWriter(f, fieldnames=['drugclip_rank', 'smiles', 'docking_score_kcal_mol', 'result_stem'])
+    writer.writeheader()
+    writer.writerows(rows)
+
+print(f'\nWrote {len(rows)} results to {summary_path}')
+PYEOF
 
 echo ""
 echo "============================================"
