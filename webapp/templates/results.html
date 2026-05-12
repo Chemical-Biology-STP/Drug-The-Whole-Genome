@@ -119,11 +119,10 @@
             {% endfor %}
             <div class="input-group input-group-sm" style="width:160px;">
                 <input type="number" class="form-control" id="top-n-custom"
-                       placeholder="Custom" min="1" max="1000"
-                       title="Enter a number between 1 and 1000 (docking limit)">
+                       placeholder="Custom" min="1" max="{{ pagination.total_items }}"
+                       title="Enter a number between 1 and {{ pagination.total_items }}">
                 <button type="button" class="btn btn-outline-secondary" id="btn-top-n-custom">Go</button>
             </div>
-            <span class="text-muted small">(max 1000 per docking run)</span>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-clear-selection">Clear</button>
         </div>
     </div>
@@ -187,6 +186,12 @@
                     Docking will be submitted for <strong id="modal-compound-count">0</strong>
                     selected compound(s) against <strong>{{ job.target_name }}</strong>.
                 </p>
+                <div id="modal-large-warning" class="alert alert-warning py-2 small d-none">
+                    <i class="bi bi-clock me-1"></i>
+                    Docking <strong id="modal-large-n"></strong> compounds will take significant
+                    HPC time (~<span id="modal-est-hours"></span>). Consider starting with a
+                    smaller set to validate the pipeline first.
+                </div>
 
                 <div class="mb-3">
                     <label class="form-label fw-semibold">Binding Site Centre (Å)
@@ -449,9 +454,9 @@
     }
 
     // Custom top-N input
-    var DOCK_MAX = 1000;
     function applyTopN(n) {
-        n = Math.max(1, Math.min(n, DOCK_MAX));
+        var maxN = {{ pagination.total_items }};
+        n = Math.max(1, Math.min(n, maxN));
         activeTopN = n;
         topNField.value = n;
         checkboxes.forEach(function (cb) { cb.checked = false; });
@@ -482,9 +487,22 @@
     }
 
     if (dockBtn) {
-        dockBtn.addEventListener('click', function () {            var n = activeTopN > 0 ? activeTopN
+        dockBtn.addEventListener('click', function () {
+            var n = activeTopN > 0 ? activeTopN
                                    : document.querySelectorAll('.compound-checkbox:checked').length;
-            document.getElementById('modal-compound-count').textContent = n;
+            document.getElementById('modal-compound-count').textContent = n.toLocaleString();
+            // Show runtime warning for large selections (>500 compounds)
+            var warning = document.getElementById('modal-large-warning');
+            if (warning) {
+                if (n > 500) {
+                    var estHours = Math.round(n * 20 / 3600 * 10) / 10;
+                    document.getElementById('modal-large-n').textContent = n.toLocaleString();
+                    document.getElementById('modal-est-hours').textContent = estHours + 'h';
+                    warning.classList.remove('d-none');
+                } else {
+                    warning.classList.add('d-none');
+                }
+            }
             dockModal.show();
         });
     }
