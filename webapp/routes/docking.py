@@ -142,7 +142,7 @@ def submit(job_id: str):
         return redirect(url_for("results.view", job_id=job_id))
 
     if len(selected) > 1000:
-        flash("Please select no more than 1000 compounds per docking run.", "warning")
+        flash(f"Please select no more than 1000 compounds per docking run (you selected {len(selected)}).", "warning")
         return redirect(url_for("results.view", job_id=job_id))
 
     # Binding site centre
