@@ -386,6 +386,7 @@ pixi run python utils/screen_streaming.py \\
     --emb-dir "${EMB_DIR}" \\
     --pocket-lmdb "${POCKET_LMDB}" \\
     --output "${SAVE_PATH}" \\
+    --lmdb-dir "${LMDB_DIR}" \\
     --fold-version 6_folds \\
     --top-fraction ${TOP_FRACTION}
 
