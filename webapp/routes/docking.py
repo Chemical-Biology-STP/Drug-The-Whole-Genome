@@ -203,7 +203,64 @@ def detail(docking_id: str):
 # Results
 # ---------------------------------------------------------------------------
 
-@docking_bp.route("/docking/<docking_id>/results", methods=["GET"])
+@docking_bp.route("/docking/<docking_id>/log", methods=["GET"])
+def log(docking_id: str):
+    """Return docking job log as JSON — shows chunk progress + merge log."""
+    email = _email()
+    if not email:
+        abort(403)
+    record = _get_docking_store().get(docking_id)
+    if record is None:
+        abort(404)
+    if not _owns(record, email):
+        abort(403)
+
+    from flask import jsonify
+    server = _server()
+    parts = []
+
+    # Show orchestrator log (prep steps)
+    orch_log = f"{record.job_dir}/orchestrator.log"
+    out, _ = server.run_command(f"tail -n 30 {orch_log} 2>/dev/null")
+    if out and out.strip():
+        parts.append(f"=== Preparation ===\n{out.strip()}")
+
+    # Show chunk logs (array tasks)
+    chunk_logs_dir = f"{record.job_dir}/logs"
+    id_pattern = record.slurm_job_id  # merge job ID — array ID is one less
+    # Read array job ID from file if available
+    arr_out, _ = server.run_command(f"cat {record.job_dir}/array_job_id.txt 2>/dev/null")
+    array_id = arr_out.strip() if arr_out else None
+
+    if array_id:
+        cmd = (
+            f"cd {chunk_logs_dir} 2>/dev/null && "
+            f"for f in $(ls chunk_*.log 2>/dev/null | sort -V | tail -10); do "
+            f"echo \"=== $f ===\"; tail -n 8 \"$f\"; echo; done"
+        )
+        out, _ = server.run_command(cmd)
+        if out and out.strip():
+            # Count completed chunks
+            done_out, _ = server.run_command(
+                f"ls {chunk_logs_dir}/chunk_*.log 2>/dev/null | wc -l"
+            )
+            n_done = (done_out or "0").strip()
+            arr_info_out, _ = server.run_command(
+                f"cat {record.job_dir}/array_job_id.txt 2>/dev/null"
+            )
+            parts.append(f"=== GPU Chunks (array {array_id}, {n_done} logs so far) ===\n{out.strip()}")
+
+    # Show merge log if available
+    merge_log = f"{record.job_dir}/slurm_merge_{record.slurm_job_id}.log"
+    out, _ = server.run_command(f"tail -n 20 {merge_log} 2>/dev/null")
+    if out and out.strip():
+        parts.append(f"=== Merge ===\n{out.strip()}")
+
+    content = "\n\n".join(parts) if parts else "Log not available yet — job may still be starting."
+    return jsonify({"log": content})
+
+
+
 def results(docking_id: str):
     email = _email()
     if not email:

@@ -111,6 +111,8 @@ class DockingSubmissionService:
         center_z: float,
         nrun: int = 20,
         box_size: float = 22.5,
+        chunk_size: int = 500,
+        max_parallel: int = 50,
     ) -> DockingRecord:
         """Prepare files, upload to HPC, and submit AutoDock-GPU job."""
         docking_id = str(uuid.uuid4())[:8]
@@ -179,24 +181,43 @@ class DockingSubmissionService:
             else:
                 raise RuntimeError("Could not find receptor PDB file.")
 
-        # --- Submit SLURM job ---
+        # --- Submit via bash (orchestrator runs on login node, submits array internally) ---
         remote_script = f"{REMOTE_PROJECT_ROOT}/submit_docking.sh"
-        script_args = [
+        args = " ".join([
             remote_job_dir,
             remote_receptor_pdb,
             remote_ligands,
             str(center_x), str(center_y), str(center_z),
             "--nrun", str(nrun),
             "--box-size", str(box_size),
-        ]
+            "--chunk-size", str(chunk_size),
+            "--max-parallel", str(max_parallel),
+        ])
+        server2 = self._server()
+        out, err = server2.run_command(f"bash {remote_script} {args}", timeout=600)
+        if not out:
+            raise RuntimeError(f"Docking orchestrator failed: {err}")
 
-        slurm_job_id = self._slurm_client.sbatch(remote_script, script_args)
+        # Parse merge job ID from last line: "MERGE_JOB_ID=<id>"
+        merge_job_id = None
+        array_job_id = None
+        for line in out.splitlines():
+            if line.startswith("MERGE_JOB_ID="):
+                merge_job_id = line.split("=", 1)[1].strip()
+            if "Submitted docking array:" in line:
+                parts = line.split()
+                if parts:
+                    array_job_id = parts[-2]  # "Submitted docking array: 12345 (N tasks)"
+        if not merge_job_id:
+            raise RuntimeError(f"Could not parse merge job ID from orchestrator output:\n{out}")
+
+        slurm_job_id = merge_job_id  # track the merge job as the primary ID
 
         now = datetime.now(timezone.utc).isoformat()
         record = DockingRecord(
             docking_id=docking_id,
             screening_job_id=screening_record.job_id,
-            slurm_job_id=slurm_job_id,
+            slurm_job_id=merge_job_id,
             session_id=email,
             email=email,
             target_name=target_name,
@@ -209,7 +230,7 @@ class DockingSubmissionService:
             submitted_at=now,
             updated_at=now,
             job_dir=remote_job_dir,
-            log_path=f"{REMOTE_JOBS_DIR}/logs/slurm_{slurm_job_id}.log",
+            log_path=f"{remote_job_dir}/slurm_merge_{merge_job_id}.log",
             summary_path=f"{remote_job_dir}/summary.csv",
             local_summary_path=None,
             error_message=None,

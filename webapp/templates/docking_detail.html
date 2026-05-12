@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', function () {
     btn.addEventListener('click', function () {
         btn.disabled = true;
         btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Loading...';
-        fetch('/jobs/{{ job.slurm_job_id }}/log')
+        fetch('/docking/{{ job.docking_id }}/log')
             .then(r => r.ok ? r.json() : Promise.reject())
             .then(d => { viewer.textContent = d.log || 'No log content available.'; })
             .catch(() => { viewer.textContent = 'Error loading log.'; })
