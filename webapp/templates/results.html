@@ -103,11 +103,22 @@
     <input type="hidden" name="center_z" id="dock-center-z" value="">
     <input type="hidden" name="nrun"     id="dock-nrun"     value="20">
     <input type="hidden" name="box_size" id="dock-box-size" value="22.5">
+    <!-- top_n: if set, dock the top N by score instead of using checkboxes -->
+    <input type="hidden" name="top_n"    id="dock-top-n"    value="">
 
 <div class="d-flex justify-content-between align-items-center mb-2">
-    <div class="form-check">
-        <input class="form-check-input" type="checkbox" id="select-all-compounds">
-        <label class="form-check-label" for="select-all-compounds">Select all on this page</label>
+    <div class="d-flex align-items-center gap-3">
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="select-all-compounds">
+            <label class="form-check-label" for="select-all-compounds">Select all on this page</label>
+        </div>
+        <div class="d-flex align-items-center gap-1">
+            <span class="text-muted small">Select top:</span>
+            {% for n in [50, 100, 200, 500, 1000] %}
+            <button type="button" class="btn btn-sm btn-outline-secondary btn-select-top" data-n="{{ n }}">{{ n }}</button>
+            {% endfor %}
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-clear-selection">Clear</button>
+        </div>
     </div>
     <button type="button" class="btn btn-primary" id="btn-dock-selected" disabled>
         <i class="bi bi-bullseye me-1"></i>Dock Selected (<span id="selected-count">0</span>)
@@ -356,29 +367,82 @@
     var dockBtn    = document.getElementById('btn-dock-selected');
     var countSpan  = document.getElementById('selected-count');
     var dockModal  = new bootstrap.Modal(document.getElementById('dockModal'));
+    var topNField  = document.getElementById('dock-top-n');
+    var activeTopN = 0;  // 0 = use checkboxes, >0 = use top-N
 
     function updateCount() {
-        var n = document.querySelectorAll('.compound-checkbox:checked').length;
+        var n = activeTopN > 0 ? activeTopN
+                               : document.querySelectorAll('.compound-checkbox:checked').length;
         countSpan.textContent = n;
         dockBtn.disabled = n === 0;
-        if (selectAll) {
-            selectAll.checked = n === checkboxes.length && n > 0;
-            selectAll.indeterminate = n > 0 && n < checkboxes.length;
+        if (selectAll && activeTopN === 0) {
+            var checked = document.querySelectorAll('.compound-checkbox:checked').length;
+            selectAll.checked = checked === checkboxes.length && checked > 0;
+            selectAll.indeterminate = checked > 0 && checked < checkboxes.length;
         }
     }
 
-    checkboxes.forEach(function (cb) { cb.addEventListener('change', updateCount); });
+    checkboxes.forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            activeTopN = 0;
+            topNField.value = '';
+            // Deactivate top-N buttons
+            document.querySelectorAll('.btn-select-top').forEach(function(b) {
+                b.classList.remove('active', 'btn-secondary');
+                b.classList.add('btn-outline-secondary');
+            });
+            updateCount();
+        });
+    });
 
     if (selectAll) {
         selectAll.addEventListener('change', function () {
+            activeTopN = 0;
+            topNField.value = '';
             checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; });
+            updateCount();
+        });
+    }
+
+    // "Select top N" buttons
+    document.querySelectorAll('.btn-select-top').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var n = parseInt(btn.getAttribute('data-n'));
+            activeTopN = n;
+            topNField.value = n;
+            // Uncheck all page checkboxes (top-N is handled server-side)
+            checkboxes.forEach(function (cb) { cb.checked = false; });
+            if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+            // Highlight active button
+            document.querySelectorAll('.btn-select-top').forEach(function(b) {
+                b.classList.remove('active', 'btn-secondary');
+                b.classList.add('btn-outline-secondary');
+            });
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-secondary', 'active');
+            updateCount();
+        });
+    });
+
+    var clearBtn = document.getElementById('btn-clear-selection');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function () {
+            activeTopN = 0;
+            topNField.value = '';
+            checkboxes.forEach(function (cb) { cb.checked = false; });
+            if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+            document.querySelectorAll('.btn-select-top').forEach(function(b) {
+                b.classList.remove('active', 'btn-secondary');
+                b.classList.add('btn-outline-secondary');
+            });
             updateCount();
         });
     }
 
     if (dockBtn) {
         dockBtn.addEventListener('click', function () {
-            var n = document.querySelectorAll('.compound-checkbox:checked').length;
+            var n = activeTopN > 0 ? activeTopN
+                                   : document.querySelectorAll('.compound-checkbox:checked').length;
             document.getElementById('modal-compound-count').textContent = n;
             dockModal.show();
         });

@@ -108,18 +108,41 @@ def submit(job_id: str):
         flash("Screening results are not available for this job.", "warning")
         return redirect(url_for("jobs.detail", job_id=job_id))
 
-    # Parse selected ranks
+    # Parse selected ranks — either explicit checkboxes or top_n
+    top_n_raw = request.form.get("top_n", "").strip()
     selected_ranks_raw = request.form.getlist("selected_compounds")
-    if not selected_ranks_raw:
+
+    if top_n_raw:
+        try:
+            top_n = int(top_n_raw)
+            if top_n < 1:
+                raise ValueError
+        except ValueError:
+            flash("Invalid top-N value.", "danger")
+            return redirect(url_for("results.view", job_id=job_id))
+        # Load all results and take the top N by score
+        all_results = parse_results(record.results_path)
+        selected = list(all_results[:top_n])
+        if not selected:
+            flash("No results available.", "danger")
+            return redirect(url_for("results.view", job_id=job_id))
+    elif selected_ranks_raw:
+        try:
+            selected_ranks = set(int(r) for r in selected_ranks_raw)
+        except ValueError:
+            flash("Invalid compound selection.", "danger")
+            return redirect(url_for("results.view", job_id=job_id))
+        all_results = parse_results(record.results_path)
+        selected = [(rank, smi, score) for rank, smi, score in all_results if rank in selected_ranks]
+        if not selected:
+            flash("None of the selected compounds were found in the results.", "danger")
+            return redirect(url_for("results.view", job_id=job_id))
+    else:
         flash("No compounds selected.", "warning")
         return redirect(url_for("results.view", job_id=job_id))
-    try:
-        selected_ranks = set(int(r) for r in selected_ranks_raw)
-    except ValueError:
-        flash("Invalid compound selection.", "danger")
-        return redirect(url_for("results.view", job_id=job_id))
-    if len(selected_ranks) > 500:
-        flash("Please select no more than 500 compounds per docking run.", "warning")
+
+    if len(selected) > 1000:
+        flash("Please select no more than 1000 compounds per docking run.", "warning")
         return redirect(url_for("results.view", job_id=job_id))
 
     # Binding site centre
@@ -136,13 +159,6 @@ def submit(job_id: str):
         box_size = max(10.0, min(60.0, float(request.form.get("box_size", 22.5))))
     except (ValueError, TypeError):
         nrun, box_size = 20, 22.5
-
-    # Filter results to selected ranks
-    all_results = parse_results(record.results_path)
-    selected = [(rank, smi, score) for rank, smi, score in all_results if rank in selected_ranks]
-    if not selected:
-        flash("None of the selected compounds were found in the results.", "danger")
-        return redirect(url_for("results.view", job_id=job_id))
 
     # Submit
     docking_store = _get_docking_store()
