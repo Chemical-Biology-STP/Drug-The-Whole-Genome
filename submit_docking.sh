@@ -269,8 +269,8 @@ echo "  Grid maps generated in $GRID_DIR"
 # Only submitted when input is .smi; skipped for pre-converted PDBQT.
 # ---------------------------------------------------------------------------
 CONVERT_SCRIPT="${JOB_DIR}/convert_chunk.sh"
-# Max parallel conversion tasks = floor(2000 / CPU_WORKERS), capped at MAX_PARALLEL
-MAX_CONV_PARALLEL=$(python3 -c "print(min(${MAX_PARALLEL}, 2000 // ${CPU_WORKERS}))")
+# Max parallel conversion tasks = floor(1600 / CPU_WORKERS) — 80% of 2000 CPU limit
+MAX_CONV_PARALLEL=$(python3 -c "print(min(${MAX_PARALLEL}, 1600 // ${CPU_WORKERS}))")
 cat > "$CONVERT_SCRIPT" << CONV_EOF
 #!/bin/bash
 #SBATCH --job-name=drugclip_convert
