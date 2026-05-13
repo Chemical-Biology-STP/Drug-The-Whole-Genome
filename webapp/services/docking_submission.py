@@ -39,21 +39,20 @@ def _derive_centre(record: JobRecord) -> Tuple[float, float, float]:
 
 
 def _smiles_to_pdbqt_local(entries: list) -> Tuple[bytes, int, int]:
-    """Convert (rank, smiles, score) list to multi-molecule PDBQT using RDKit.
+    """Convert (rank, smiles, score) list to multi-molecule PDBQT.
 
-    Uses multiprocessing for speed and builds PDBQT directly (no subprocess).
+    Uses prepare_ligand4.py for correct AD4 atom typing and torsion detection,
+    parallelised with multiprocessing.Pool for speed.
     """
     try:
         from rdkit import Chem
-        from rdkit.Chem import AllChem, rdPartialCharges
+        from rdkit.Chem import AllChem
+        import subprocess, tempfile
         from multiprocessing import Pool, cpu_count
     except ImportError as e:
         raise RuntimeError("RDKit is required for ligand PDBQT generation.") from e
 
-    _AD_TYPES = {
-        6: 'C', 7: 'NA', 8: 'OA', 16: 'SA',
-        9: 'F', 17: 'Cl', 35: 'Br', 53: 'I', 15: 'P',
-    }
+    _PREPARE_LIGAND = "/nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_ligand4.py"
 
     def _convert(args):
         rank, smiles, score = args
@@ -67,31 +66,24 @@ def _smiles_to_pdbqt_local(entries: list) -> Tuple[bytes, int, int]:
                 if AllChem.EmbedMolecule(mol, AllChem.ETKDG()) == -1:
                     return None
             AllChem.MMFFOptimizeMolecule(mol)
-            rdPartialCharges.ComputeGasteigerCharges(mol)
             mol = Chem.RemoveHs(mol)
-            mol.SetProp('_Name', f'rank_{rank}')
-            conf = mol.GetConformer()
-            lines = [
-                f'REMARK DrugCLIP rank={rank} score={score:.6f}',
-                f'REMARK SMILES={smiles}',
-                'ROOT',
-            ]
-            for i, atom in enumerate(mol.GetAtoms()):
-                pos = conf.GetAtomPosition(i)
-                charge = float(atom.GetPropsAsDict().get('_GasteigerCharge', 0.0))
-                if charge != charge: charge = 0.0
-                anum = atom.GetAtomicNum()
-                ad_type = _AD_TYPES.get(anum, atom.GetSymbol())
-                rec = 'HETATM' if anum != 6 else 'ATOM  '
-                aname = f'{atom.GetSymbol()}{i+1}'[:4].ljust(4)
-                lines.append(
-                    f'{rec}{i+1:5d} {aname} LIG A   1    '
-                    f'{pos.x:8.3f}{pos.y:8.3f}{pos.z:8.3f}'
-                    f'  1.00  0.00    {charge:+.3f} {ad_type}'
+            mol.SetProp("_Name", f"rank_{rank}")
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                pdb_path  = os.path.join(tmpdir, "lig.pdb")
+                pdbqt_path = os.path.join(tmpdir, "lig.pdbqt")
+                Chem.MolToPDBFile(mol, pdb_path)
+                result = subprocess.run(
+                    ["pixi", "run", "python", _PREPARE_LIGAND,
+                     "-l", pdb_path, "-o", pdbqt_path, "-A", "hydrogens"],
+                    capture_output=True, text=True, timeout=120,
                 )
-            lines.append('ENDROOT')
-            lines.append('TORSDOF 0')
-            return '\n'.join(lines)
+                if result.returncode != 0 or not os.path.exists(pdbqt_path):
+                    return None
+                with open(pdbqt_path) as f:
+                    block = f.read().strip()
+            header = f"REMARK DrugCLIP rank={rank} score={score:.6f}\nREMARK SMILES={smiles}\n"
+            return header + block
         except Exception:
             return None
 

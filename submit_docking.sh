@@ -93,13 +93,15 @@ if [[ "$LIGANDS_FILE" == *.smi ]]; then
     echo "[Step 1/5] Converting SMILES to PDBQT (parallel, all CPUs)..."
     LIGANDS_PDBQT="${JOB_DIR}/ligands_input.pdbqt"
     pixi run python - "$LIGANDS_FILE" "$LIGANDS_PDBQT" << 'PYEOF'
-import sys, os
+import sys, os, subprocess, tempfile
 from rdkit import Chem
-from rdkit.Chem import AllChem, rdPartialCharges
+from rdkit.Chem import AllChem
 from multiprocessing import Pool, cpu_count
 
 smi_file = sys.argv[1]
 out_file  = sys.argv[2]
+
+PREPARE_LIGAND = '/nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_ligand4.py'
 
 # Read all entries upfront
 entries = []
@@ -109,52 +111,33 @@ with open(smi_file) as f:
         if parts:
             entries.append((parts[0], parts[1] if len(parts) > 1 else 'lig'))
 
-def smiles_to_pdbqt_block(args):
-    """Convert one SMILES to a PDBQT block string. Returns None on failure."""
+def convert_one(args):
     smiles, name = args
     try:
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return None
         mol = Chem.AddHs(mol)
-        p = AllChem.ETKDGv3()
-        p.randomSeed = 42
+        p = AllChem.ETKDGv3(); p.randomSeed = 42
         if AllChem.EmbedMolecule(mol, p) == -1:
             if AllChem.EmbedMolecule(mol, AllChem.ETKDG()) == -1:
                 return None
         AllChem.MMFFOptimizeMolecule(mol)
-        # Compute Gasteiger charges (what prepare_ligand4.py does)
-        rdPartialCharges.ComputeGasteigerCharges(mol)
         mol = Chem.RemoveHs(mol)
         mol.SetProp('_Name', name)
 
-        # Build PDBQT lines directly from RDKit
-        # AutoDock atom types: C->C, N->NA/N, O->OA/O, S->SA/S, H->HD, F->F, Cl->Cl, Br->Br, I->I
-        _AD_TYPES = {
-            6:  'C',  7:  'NA', 8:  'OA', 16: 'SA',
-            9:  'F',  17: 'Cl', 35: 'Br', 53: 'I',
-            15: 'P',
-        }
-        conf = mol.GetConformer()
-        lines = [f'REMARK SMILES={smiles}']
-        lines.append(f'ROOT')
-        for i, atom in enumerate(mol.GetAtoms()):
-            pos = conf.GetAtomPosition(i)
-            charge = float(atom.GetPropsAsDict().get('_GasteigerCharge', 0.0))
-            if charge != charge:  # NaN check
-                charge = 0.0
-            anum = atom.GetAtomicNum()
-            ad_type = _AD_TYPES.get(anum, atom.GetSymbol())
-            rec = 'HETATM' if anum != 6 else 'ATOM  '
-            aname = f'{atom.GetSymbol()}{i+1}'[:4].ljust(4)
-            lines.append(
-                f'{rec}{i+1:5d} {aname} LIG A   1    '
-                f'{pos.x:8.3f}{pos.y:8.3f}{pos.z:8.3f}'
-                f'  1.00  0.00    {charge:+.3f} {ad_type}'
-            )
-        lines.append('ENDROOT')
-        lines.append(f'TORSDOF 0')
-        return '\n'.join(lines)
+        with tempfile.TemporaryDirectory() as td:
+            pdb  = os.path.join(td, 'lig.pdb')
+            pdbqt = os.path.join(td, 'lig.pdbqt')
+            Chem.MolToPDBFile(mol, pdb)
+            r = subprocess.run(
+                ['pixi', 'run', 'python', PREPARE_LIGAND,
+                 '-l', pdb, '-o', pdbqt, '-A', 'hydrogens'],
+                capture_output=True, text=True, timeout=120)
+            if r.returncode != 0 or not os.path.exists(pdbqt):
+                return None
+            with open(pdbqt) as f2:
+                return f'REMARK SMILES={smiles}\n' + f2.read().strip()
     except Exception:
         return None
 
@@ -162,7 +145,7 @@ n_workers = min(cpu_count(), 16)
 print(f'Converting {len(entries)} ligands using {n_workers} workers...')
 
 with Pool(n_workers) as pool:
-    results = pool.map(smiles_to_pdbqt_block, entries)
+    results = pool.map(convert_one, entries)
 
 blocks = [r for r in results if r is not None]
 n_ok   = len(blocks)
