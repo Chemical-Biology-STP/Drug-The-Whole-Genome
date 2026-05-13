@@ -40,7 +40,9 @@ NRUN=20
 BOX_SIZE=22.5
 CHUNK_SIZE=500
 PARTITION="ga100"
+CPU_PARTITION="ncpu"
 MAX_PARALLEL=50
+CPU_WORKERS=16   # workers per conversion task (cpus-per-task)
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,7 +50,9 @@ while [ $# -gt 0 ]; do
         --box-size)     BOX_SIZE="$2";     shift 2 ;;
         --chunk-size)   CHUNK_SIZE="$2";   shift 2 ;;
         --partition)    PARTITION="$2";    shift 2 ;;
+        --cpu-partition) CPU_PARTITION="$2"; shift 2 ;;
         --max-parallel) MAX_PARALLEL="$2"; shift 2 ;;
+        --cpu-workers)  CPU_WORKERS="$2";  shift 2 ;;
         *)              echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -265,12 +269,14 @@ echo "  Grid maps generated in $GRID_DIR"
 # Only submitted when input is .smi; skipped for pre-converted PDBQT.
 # ---------------------------------------------------------------------------
 CONVERT_SCRIPT="${JOB_DIR}/convert_chunk.sh"
+# Max parallel conversion tasks = floor(2000 / CPU_WORKERS), capped at MAX_PARALLEL
+MAX_CONV_PARALLEL=$(python3 -c "print(min(${MAX_PARALLEL}, 2000 // ${CPU_WORKERS}))")
 cat > "$CONVERT_SCRIPT" << CONV_EOF
 #!/bin/bash
 #SBATCH --job-name=drugclip_convert
-#SBATCH --partition=cpu
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=32G
+#SBATCH --partition=${CPU_PARTITION}
+#SBATCH --cpus-per-task=${CPU_WORKERS}
+#SBATCH --mem=$(( CPU_WORKERS * 2 ))G
 #SBATCH --time=4:00:00
 #SBATCH --output=${JOB_DIR}/logs/convert_%a.log
 
@@ -388,7 +394,7 @@ SPLIT_SCRIPT="${JOB_DIR}/split_and_dock.sh"
 cat > "$SPLIT_SCRIPT" << SPLIT_EOF
 #!/bin/bash
 #SBATCH --job-name=drugclip_split_dock
-#SBATCH --partition=cpu
+#SBATCH --partition=${CPU_PARTITION}
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
 #SBATCH --time=1:00:00
@@ -497,7 +503,7 @@ MERGE_SCRIPT="${JOB_DIR}/merge_results.sh"
 cat > "$MERGE_SCRIPT" << MERGE_EOF
 #!/bin/bash
 #SBATCH --job-name=drugclip_dock_merge
-#SBATCH --partition=cpu
+#SBATCH --partition=${CPU_PARTITION}
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 #SBATCH --time=2:00:00
@@ -582,9 +588,9 @@ if [ "$NEED_CONVERSION" -eq 1 ]; then
     # The split_and_dock job submits the dock array and merge job itself
     CONV_JOB=$(sbatch \
         --parsable \
-        --array="0-${LAST_CHUNK_IDX}%${MAX_PARALLEL}" \
+        --array="0-${LAST_CHUNK_IDX}%${MAX_CONV_PARALLEL}" \
         "$CONVERT_SCRIPT")
-    echo "  Stage 2 (convert array): $CONV_JOB ($N_CHUNKS tasks)"
+    echo "  Stage 2 (convert array): $CONV_JOB ($N_CHUNKS tasks, max ${MAX_CONV_PARALLEL} parallel = $(( MAX_CONV_PARALLEL * CPU_WORKERS )) CPUs)"
 
     SPLIT_JOB=$(sbatch \
         --parsable \

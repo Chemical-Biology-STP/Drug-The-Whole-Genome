@@ -200,6 +200,7 @@ class DockingSubmissionService:
             "--box-size", str(box_size),
             "--chunk-size", str(chunk_size),
             "--max-parallel", str(max_parallel),
+            "--cpu-partition", "ncpu",
         ])
         server2 = self._server()
         out, err = server2.run_command(f"bash {remote_script} {args}", timeout=600)
