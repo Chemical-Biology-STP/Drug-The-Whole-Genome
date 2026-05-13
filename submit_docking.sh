@@ -41,7 +41,7 @@ BOX_SIZE=22.5
 CHUNK_SIZE=500
 PARTITION="ga100"
 CPU_PARTITION="ncpu"
-MAX_PARALLEL=50
+MAX_PARALLEL=24   # 80% of 30 GPU account limit
 CPU_WORKERS=16   # workers per conversion task (cpus-per-task)
 
 while [ $# -gt 0 ]; do
