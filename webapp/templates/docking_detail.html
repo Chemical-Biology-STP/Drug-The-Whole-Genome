@@ -16,6 +16,14 @@
             Docking Job <code>{{ job.docking_id }}</code>
             <span class="badge badge-status-{{ job.status|lower }}">{{ job.status }}</span>
         </h2>
+        {% if job.status == 'QUEUING' %}
+        <div class="alert alert-info">
+            <i class="bi bi-hourglass-split me-2"></i>
+            <strong>Preparing submission…</strong>
+            Uploading files and running receptor preparation in the background.
+            This page will refresh automatically. You can safely navigate away.
+        </div>
+        {% endif %}
     </div>
 </div>
 
@@ -42,7 +50,7 @@
             </div>
         </div>
 
-        {% if job.status in ('RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT') %}
+        {% if job.status in ('RUNNING', 'COMPLETED', 'FAILED', 'TIMEOUT', 'QUEUING') %}
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0"><i class="bi bi-terminal me-2"></i>SLURM Log</h5>
@@ -95,7 +103,7 @@
                 </a>
                 {% endif %}
 
-                {% if job.status in ('PENDING', 'RUNNING') %}
+                {% if job.status in ('PENDING', 'RUNNING', 'QUEUING') %}
                 <form method="POST" action="{{ url_for('docking.force_refresh', docking_id=job.docking_id) }}"
                       data-loading
                       data-loading-title="Checking job status…"
@@ -132,7 +140,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
-{% if job.status in ('PENDING', 'RUNNING') %}
+{% if job.status in ('PENDING', 'RUNNING', 'QUEUING') %}
 <script>
 // Auto-refresh every 30 seconds while job is active
 setTimeout(function() { window.location.reload(); }, 30000);

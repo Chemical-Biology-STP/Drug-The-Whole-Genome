@@ -157,29 +157,64 @@ def submit(job_id: str):
     except (ValueError, TypeError):
         nrun, box_size = 20, 22.5
 
-    # Submit
+    # Submit asynchronously — SSH + local prep can take minutes for large sets
+    import threading
     docking_store = _get_docking_store()
     service = DockingSubmissionService(SlurmClient(), docking_store, PROJECT_ROOT)
-    try:
-        docking_record = service.submit(
-            email=email,
-            screening_record=record,
-            selected_compounds=selected,
-            center_x=center_x,
-            center_y=center_y,
-            center_z=center_z,
-            nrun=nrun,
-            box_size=box_size,
-        )
-    except RuntimeError as e:
-        flash(f"Docking preparation failed: {e}", "danger")
-        return redirect(url_for("results.view", job_id=job_id))
-    except SlurmError as e:
-        flash(f"Docking job submission failed: {e.stderr}", "danger")
-        return redirect(url_for("results.view", job_id=job_id))
 
-    flash(f"Docking job submitted! {docking_record.n_compounds} compounds → SLURM job {docking_record.slurm_job_id}", "success")
-    return redirect(url_for("docking.detail", docking_id=docking_record.docking_id))
+    # Create a placeholder record immediately so the user can navigate away
+    docking_id = __import__('uuid').uuid4().hex[:8]
+    from webapp.services.models import DockingRecord
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    placeholder = DockingRecord(
+        docking_id=docking_id,
+        screening_job_id=record.job_id,
+        slurm_job_id=None,
+        session_id=email,
+        email=email,
+        target_name=record.target_name,
+        library_name=record.library_name,
+        n_compounds=len(selected),
+        center_x=center_x,
+        center_y=center_y,
+        center_z=center_z,
+        status="QUEUING",
+        submitted_at=now,
+        updated_at=now,
+        job_dir=None,
+        log_path=None,
+        summary_path=None,
+        local_summary_path=None,
+        error_message=None,
+    )
+    docking_store.add(placeholder)
+
+    def _submit_in_background():
+        try:
+            docking_record = service.submit(
+                email=email,
+                screening_record=record,
+                selected_compounds=selected,
+                center_x=center_x,
+                center_y=center_y,
+                center_z=center_z,
+                nrun=nrun,
+                box_size=box_size,
+                _docking_id=docking_id,  # reuse the placeholder ID
+            )
+        except Exception as e:
+            docking_store.update(docking_id, {
+                "status": "FAILED",
+                "error_message": str(e),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+    thread = threading.Thread(target=_submit_in_background, daemon=True)
+    thread.start()
+
+    flash(f"Docking job queued — {len(selected):,} compounds. Preparing files and submitting to HPC in the background.", "success")
+    return redirect(url_for("docking.detail", docking_id=docking_id))
 
 
 # ---------------------------------------------------------------------------

@@ -120,10 +120,11 @@ class DockingSubmissionService:
         nrun: int = 20,
         box_size: float = 22.5,
         chunk_size: int = 500,
-        max_parallel: int = 50,
+        max_parallel: int = 24,
+        _docking_id: str = None,  # reuse a pre-created placeholder ID
     ) -> DockingRecord:
         """Prepare files, upload to HPC, and submit AutoDock-GPU job."""
-        docking_id = str(uuid.uuid4())[:8]
+        docking_id = _docking_id or str(uuid.uuid4())[:8]
         target_name = screening_record.target_name
         library_name = screening_record.library_name
 
@@ -244,7 +245,21 @@ class DockingSubmissionService:
             local_summary_path=None,
             error_message=None,
         )
-        self._docking_store.add(record)
+        # If a placeholder was pre-created, update it in-place; otherwise add fresh
+        if _docking_id:
+            self._docking_store.update(docking_id, {
+                "slurm_job_id": merge_job_id,
+                "n_compounds": n_compounds,
+                "status": "PENDING",
+                "updated_at": now,
+                "job_dir": remote_job_dir,
+                "log_path": f"{remote_job_dir}/slurm_merge_{merge_job_id}.log",
+                "summary_path": f"{remote_job_dir}/summary.csv",
+                "local_summary_path": None,
+                "error_message": None,
+            })
+        else:
+            self._docking_store.add(record)
 
         # Clean up local temp files
         import shutil
