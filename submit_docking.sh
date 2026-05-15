@@ -58,7 +58,8 @@ while [ $# -gt 0 ]; do
 done
 
 LOG="${JOB_DIR}/orchestrator.log"
-exec > "$LOG" 2>&1
+# Tee output to both the log file and stdout (so the webapp can capture it)
+exec > >(tee -a "$LOG") 2>&1
 
 echo "============================================"
 echo "AutoDock-GPU Multi-GPU Docking Pipeline"

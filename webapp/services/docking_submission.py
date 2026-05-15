@@ -206,7 +206,7 @@ class DockingSubmissionService:
         server2 = self._server()
         out, err = server2.run_command(f"bash {remote_script} {args}", timeout=600)
         if not out:
-            raise RuntimeError(f"Docking orchestrator failed: {err}")
+            raise RuntimeError(f"Docking orchestrator failed: {err or 'no output — check orchestrator.log on HPC'}")
 
         # Parse merge job ID from last line: "MERGE_JOB_ID=<id>"
         merge_job_id = None
@@ -219,7 +219,10 @@ class DockingSubmissionService:
                 if parts:
                     array_job_id = parts[-2]  # "Submitted docking array: 12345 (N tasks)"
         if not merge_job_id:
-            raise RuntimeError(f"Could not parse merge job ID from orchestrator output:\n{out}")
+            raise RuntimeError(
+                f"Could not parse merge job ID from orchestrator output.\n"
+                f"Last 20 lines:\n" + "\n".join(out.splitlines()[-20:])
+            )
 
         slurm_job_id = merge_job_id  # track the merge job as the primary ID
 
