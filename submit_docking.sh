@@ -257,38 +257,18 @@ else
 fi
 
 cd "$JOB_DIR"
-# Collect all unique AD4 atom types across all ligands so the grid covers them all
-ALL_ATOM_TYPES=$(pixi run python - "$LIGANDS_DIR" "$SMI_CHUNKS_DIR" << 'PYEOF'
-import sys, os, re, glob
-
-lig_dir   = sys.argv[1]
-smi_dir   = sys.argv[2]
-
-# Common AD4 atom types to always include for drug-like molecules
-base_types = {'C', 'A', 'N', 'NA', 'NS', 'OA', 'OS', 'O', 'S', 'SA',
-              'HD', 'H', 'F', 'Cl', 'Br', 'I', 'P', 'e', 'd'}
-
-found = set(base_types)
-
-# Also scan any already-converted PDBQT files for their actual types
-for pdbqt in glob.glob(os.path.join(lig_dir, 'rank_*.pdbqt'))[:20]:
-    with open(pdbqt) as f:
-        for line in f:
-            if line[:6].strip() in ('ATOM', 'HETATM'):
-                parts = line.split()
-                if parts:
-                    found.add(parts[-1])
-
-print(' '.join(sorted(found)))
-PYEOF
-)
-echo "  Atom types for grid: $ALL_ATOM_TYPES"
+# Use a comprehensive set of valid AD4 atom types covering all drug-like chemistry.
+# This ensures autogrid4 generates maps for every type that might appear in the library.
+# Types: aromatic C (A), aliphatic C (C), N variants, O variants, S variants,
+#        halogens, polar H (HD), phosphorus, and metals common in drugs.
+LIGAND_TYPES="A C N NA NS OA OS S SA HD H F Cl Br I P"
 
 pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_gpf4.py \
     -r "$RECEPTOR_PDBQT" -l "$GRID_LIGAND" -o "$GPF" \
     -p npts="${NPTS},${NPTS},${NPTS}" \
     -p gridcenter="${CENTER_X},${CENTER_Y},${CENTER_Z}" \
-    -p ligand_types="${ALL_ATOM_TYPES}"
+    -p ligand_types="${LIGAND_TYPES}"
+echo "  Atom types for grid: $LIGAND_TYPES"
 autogrid4 -p "$GPF" -l "${GRID_DIR}/receptor.glg"
 cd "$DRUGCLIP_ROOT"
 echo "  Grid maps generated in $GRID_DIR"
