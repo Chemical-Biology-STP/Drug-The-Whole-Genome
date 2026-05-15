@@ -15,6 +15,9 @@ PROJECT_ROOT = os.path.dirname(_WEBAPP_DIR)
 UPLOAD_FOLDER = os.path.join(_WEBAPP_DIR, "uploads")
 SESSION_FILE_DIR = os.path.join(_WEBAPP_DIR, "flask_session")
 
+# Persistent cache for downloaded HPC results (survives restarts, unlike /tmp)
+RESULTS_CACHE_DIR = os.path.join(_WEBAPP_DIR, "data", "results_cache")
+
 # SQLite user database
 DB_FILE = os.path.join(_WEBAPP_DIR, "data", "users.db")
 

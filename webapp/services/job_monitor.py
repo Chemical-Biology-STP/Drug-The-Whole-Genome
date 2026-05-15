@@ -197,8 +197,8 @@ class JobMonitor:
 
             if new_status == "COMPLETED":
                 # Download summary.csv from HPC
-                import tempfile
-                local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking", record.docking_id)
+                from webapp.config import RESULTS_CACHE_DIR
+                local_dir = os.path.join(RESULTS_CACHE_DIR, "docking", record.docking_id)
                 os.makedirs(local_dir, exist_ok=True)
                 local_summary = os.path.join(local_dir, "summary.csv")
                 server = RemoteServer(REMOTE_HOST, REMOTE_USER)
@@ -284,9 +284,9 @@ class JobMonitor:
         return "RUNNING"
 
     def _download_results(self, job_id: str, remote_results: str) -> Optional[str]:
-        """Download results.txt from the HPC to a local cache path."""
-        import tempfile
-        local_dir = os.path.join(tempfile.gettempdir(), "drugclip_results", job_id)
+        """Download results.txt from the HPC to a persistent local cache path."""
+        from webapp.config import RESULTS_CACHE_DIR
+        local_dir = os.path.join(RESULTS_CACHE_DIR, "screening", job_id)
         os.makedirs(local_dir, exist_ok=True)
         local_path = os.path.join(local_dir, "results.txt")
         server = RemoteServer(REMOTE_HOST, REMOTE_USER)

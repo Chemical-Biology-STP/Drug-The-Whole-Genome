@@ -55,10 +55,11 @@ def _server() -> RemoteServer:
 
 def _fetch_summary(record) -> list[dict]:
     """Download summary.csv from HPC if not cached locally, return rows."""
+    from webapp.config import RESULTS_CACHE_DIR
     if record.local_summary_path and os.path.exists(record.local_summary_path):
         path = record.local_summary_path
     elif record.summary_path:
-        local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking", record.docking_id)
+        local_dir = os.path.join(RESULTS_CACHE_DIR, "docking", record.docking_id)
         os.makedirs(local_dir, exist_ok=True)
         local_path = os.path.join(local_dir, "summary.csv")
         ok, _ = _server().download_file(record.summary_path, local_path)
@@ -789,8 +790,8 @@ def force_refresh(docking_id: str):
             updates = {"status": new_status, "updated_at": now}
             if new_status == "COMPLETED":
                 # Download summary.csv
-                import tempfile
-                local_dir = os.path.join(tempfile.gettempdir(), "drugclip_docking", docking_id)
+                from webapp.config import RESULTS_CACHE_DIR
+                local_dir = os.path.join(RESULTS_CACHE_DIR, "docking", docking_id)
                 os.makedirs(local_dir, exist_ok=True)
                 local_summary = os.path.join(local_dir, "summary.csv")
                 ok, _ = _server().download_file(record.summary_path, local_summary)

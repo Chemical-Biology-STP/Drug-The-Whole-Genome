@@ -46,6 +46,25 @@ def view(job_id: str):
         flash("Results are not yet available for this job.", "warning")
         return redirect(url_for("jobs.detail", job_id=job_id))
 
+    # Re-download if the cached file is missing (e.g. after server restart)
+    if not os.path.exists(record.results_path):
+        from webapp.config import RESULTS_CACHE_DIR
+        from webapp.modules.remote_server import RemoteServer
+        from webapp.config import REMOTE_HOST, REMOTE_USER, REMOTE_JOBS_DIR
+        local_dir = os.path.join(RESULTS_CACHE_DIR, "screening", job_id)
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, "results.txt")
+        server = RemoteServer(REMOTE_HOST, REMOTE_USER)
+        # Try the remote path derived from job_dir
+        remote_results = f"{record.job_dir}/results.txt"
+        ok, _ = server.download_file(remote_results, local_path)
+        if ok:
+            _get_job_store().update_job(job_id, {"results_path": local_path})
+            record = _get_job_store().get_job(job_id)
+        else:
+            flash("Results file could not be retrieved from the HPC.", "danger")
+            return redirect(url_for("jobs.detail", job_id=job_id))
+
     results = parse_results(record.results_path)
     try:
         page = int(request.args.get("page", 1))
