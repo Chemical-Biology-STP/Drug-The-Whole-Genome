@@ -297,6 +297,7 @@ def log(docking_id: str):
 
 
 
+@docking_bp.route("/docking/<docking_id>/results", methods=["GET"])
 def results(docking_id: str):
     email = _email()
     if not email:
