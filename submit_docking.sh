@@ -486,7 +486,9 @@ echo "Docking chunk \$CHUNK_IDX: \$(wc -l < \$CHUNK_PATH) ligands"
 BATCH_FILE="${JOB_DIR}/chunks/batch_\${CHUNK_IDX}.txt"
 echo "${JOB_DIR}/receptor.maps.fld" > "\$BATCH_FILE"
 while IFS=' ' read -r lig_path stem; do
-    echo "\${lig_path} ${RESULTS_DIR}/\${stem}" >> "\$BATCH_FILE"
+    # AutoDock-GPU filelist format: ligand path on one line, resname on next line
+    echo "\${lig_path}" >> "\$BATCH_FILE"
+    echo "${RESULTS_DIR}/\${stem}" >> "\$BATCH_FILE"
 done < "\$CHUNK_PATH"
 
 autodock_gpu_128wi \
