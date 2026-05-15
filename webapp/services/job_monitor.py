@@ -196,12 +196,34 @@ class JobMonitor:
             updates: dict = {"status": new_status, "updated_at": now}
 
             if new_status == "COMPLETED":
+                # For SMILES-input jobs, the primary job is split_and_dock which completes
+                # quickly. The real merge job ID is written to orchestrator.log.
+                # Check for it and switch tracking to the merge job instead.
+                server = RemoteServer(REMOTE_HOST, REMOTE_USER)
+                if record.job_dir:
+                    orch_log = f"{record.job_dir}/orchestrator.log"
+                    orch_out, _ = server.run_command(
+                        f"grep 'REAL_MERGE_JOB_ID=' {orch_log} 2>/dev/null | tail -1"
+                    )
+                    if orch_out and "REAL_MERGE_JOB_ID=" in orch_out:
+                        real_merge_id = orch_out.strip().split("=", 1)[1].strip()
+                        if real_merge_id and real_merge_id != record.slurm_job_id:
+                            # Switch to tracking the real merge job
+                            logger.info("Docking job %s: switching to real merge job %s",
+                                        record.docking_id, real_merge_id)
+                            docking_store.update(record.docking_id, {
+                                "slurm_job_id": real_merge_id,
+                                "status": "RUNNING",
+                                "updated_at": now,
+                                "log_path": f"{record.job_dir}/slurm_merge_{real_merge_id}.log",
+                            })
+                            continue  # Don't mark as completed yet
+
                 # Download summary.csv from HPC
                 from webapp.config import RESULTS_CACHE_DIR
                 local_dir = os.path.join(RESULTS_CACHE_DIR, "docking", record.docking_id)
                 os.makedirs(local_dir, exist_ok=True)
                 local_summary = os.path.join(local_dir, "summary.csv")
-                server = RemoteServer(REMOTE_HOST, REMOTE_USER)
                 ok, _ = server.download_file(record.summary_path, local_summary)
                 if ok:
                     updates["local_summary_path"] = local_summary

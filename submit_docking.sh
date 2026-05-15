@@ -456,6 +456,9 @@ echo "Merge job: \$MERGE_JOB"
 
 echo "\${DOCK_JOB}" > "${JOB_DIR}/dock_array_job_id.txt"
 echo "\${MERGE_JOB}" > "${JOB_DIR}/merge_job_id.txt"
+
+# Signal to the webapp that the real terminal job is the merge job
+echo "REAL_MERGE_JOB_ID=\${MERGE_JOB}" >> "${JOB_DIR}/orchestrator.log"
 SPLIT_EOF
 
 # ---------------------------------------------------------------------------
