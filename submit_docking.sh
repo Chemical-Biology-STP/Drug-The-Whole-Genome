@@ -261,7 +261,7 @@ cd "$JOB_DIR"
 # This ensures autogrid4 generates maps for every type that might appear in the library.
 # Types: aromatic C (A), aliphatic C (C), N variants, O variants, S variants,
 #        halogens, polar H (HD), phosphorus, and metals common in drugs.
-LIGAND_TYPES="A C N NA NS OA OS S SA HD H F Cl Br I P"
+LIGAND_TYPES="A C N NA NS OA OS S SA HD H F Cl Br I P Si Se"
 
 pixi run python /nemo/stp/chemicalbiology/home/shared/software/AutoDockTools/Utilities24/prepare_gpf4.py \
     -r "$RECEPTOR_PDBQT" -l "$GRID_LIGAND" -o "$GPF" \
