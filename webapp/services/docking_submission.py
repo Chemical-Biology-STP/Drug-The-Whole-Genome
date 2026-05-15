@@ -60,6 +60,10 @@ def _smiles_to_pdbqt_local(entries: list) -> Tuple[bytes, int, int]:
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 return None
+            # Strip salts/counter-ions — keep only the largest fragment
+            frags = Chem.GetMolFrags(mol, asMols=True)
+            if len(frags) > 1:
+                mol = max(frags, key=lambda m: m.GetNumHeavyAtoms())
             mol = Chem.AddHs(mol)
             p = AllChem.ETKDGv3(); p.randomSeed = 42
             if AllChem.EmbedMolecule(mol, p) == -1:
