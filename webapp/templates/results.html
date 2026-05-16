@@ -105,6 +105,8 @@
     <input type="hidden" name="box_size" id="dock-box-size" value="22.5">
     <!-- top_n: if set, dock the top N by score instead of using checkboxes -->
     <input type="hidden" name="top_n"    id="dock-top-n"    value="">
+    <!-- rank_list: comma-separated specific ranks to dock -->
+    <input type="hidden" name="rank_list" id="dock-rank-list" value="">
 
 <div class="d-flex justify-content-between align-items-center mb-2">
     <div class="d-flex align-items-center gap-3">
@@ -124,6 +126,14 @@
                 <button type="button" class="btn btn-outline-secondary" id="btn-top-n-custom">Go</button>
             </div>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-clear-selection">Clear</button>
+        </div>
+        <div class="d-flex align-items-center gap-1">
+            <span class="text-muted small">Specific ranks:</span>
+            <input type="text" class="form-control form-control-sm" id="rank-list-input"
+                   placeholder="e.g. 17902,18663,28148"
+                   style="width:220px;"
+                   title="Enter comma-separated rank numbers to dock specific compounds">
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-rank-list">Select</button>
         </div>
     </div>
     <button type="button" class="btn btn-primary" id="btn-dock-selected" disabled>
@@ -441,6 +451,7 @@
         clearBtn.addEventListener('click', function () {
             activeTopN = 0;
             topNField.value = '';
+            document.getElementById('dock-rank-list').value = '';
             checkboxes.forEach(function (cb) { cb.checked = false; });
             if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
             document.querySelectorAll('.btn-select-top').forEach(function(b) {
@@ -449,7 +460,40 @@
             });
             var customInput = document.getElementById('top-n-custom');
             if (customInput) customInput.value = '';
+            var rankInput = document.getElementById('rank-list-input');
+            if (rankInput) rankInput.value = '';
             updateCount();
+        });
+    }
+
+    // Specific rank list input
+    var rankListBtn = document.getElementById('btn-rank-list');
+    var rankListInput = document.getElementById('rank-list-input');
+    var rankListField = document.getElementById('dock-rank-list');
+    if (rankListBtn && rankListInput) {
+        rankListBtn.addEventListener('click', function () {
+            var raw = rankListInput.value.trim();
+            if (!raw) return;
+            var ranks = raw.split(/[\s,]+/).filter(function(r) { return /^\d+$/.test(r); });
+            if (ranks.length === 0) return;
+            // Clear other selections
+            activeTopN = 0;
+            topNField.value = '';
+            checkboxes.forEach(function (cb) { cb.checked = false; });
+            if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+            document.querySelectorAll('.btn-select-top').forEach(function(b) {
+                b.classList.remove('active', 'btn-secondary');
+                b.classList.add('btn-outline-secondary');
+            });
+            var customInput = document.getElementById('top-n-custom');
+            if (customInput) customInput.value = '';
+            // Set rank list
+            rankListField.value = ranks.join(',');
+            activeTopN = ranks.length;  // use for count display
+            updateCount();
+        });
+        rankListInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); rankListBtn.click(); }
         });
     }
 

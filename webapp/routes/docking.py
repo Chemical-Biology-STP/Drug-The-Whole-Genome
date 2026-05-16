@@ -109,11 +109,26 @@ def submit(job_id: str):
         flash("Screening results are not available for this job.", "warning")
         return redirect(url_for("jobs.detail", job_id=job_id))
 
-    # Parse selected ranks — either explicit checkboxes or top_n
+    # Parse selected ranks — explicit checkboxes, top_n, or specific rank_list
     top_n_raw = request.form.get("top_n", "").strip()
+    rank_list_raw = request.form.get("rank_list", "").strip()
     selected_ranks_raw = request.form.getlist("selected_compounds")
 
-    if top_n_raw:
+    if rank_list_raw:
+        try:
+            rank_list = [int(r) for r in rank_list_raw.split(",") if r.strip()]
+            if not rank_list:
+                raise ValueError
+        except ValueError:
+            flash("Invalid rank list.", "danger")
+            return redirect(url_for("results.view", job_id=job_id))
+        all_results = parse_results(record.results_path)
+        rank_set = set(rank_list)
+        selected = [(rank, smi, score) for rank, smi, score in all_results if rank in rank_set]
+        if not selected:
+            flash("None of the specified ranks were found in the results.", "danger")
+            return redirect(url_for("results.view", job_id=job_id))
+    elif top_n_raw:
         try:
             top_n = int(top_n_raw)
             if top_n < 1:
