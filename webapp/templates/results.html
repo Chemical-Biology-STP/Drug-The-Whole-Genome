@@ -108,38 +108,51 @@
     <!-- rank_list: comma-separated specific ranks to dock -->
     <input type="hidden" name="rank_list" id="dock-rank-list" value="">
 
-<div class="mb-3">
-    <!-- Row 1: select all + top-N buttons -->
-    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-        <div class="form-check mb-0">
-            <input class="form-check-input" type="checkbox" id="select-all-compounds">
-            <label class="form-check-label" for="select-all-compounds">Select all on this page</label>
+<!-- Selection toolbar -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex flex-column gap-2">
+
+                <!-- Line 1: Select all + preset top-N + custom N + clear -->
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="select-all-compounds">
+                        <label class="form-check-label small" for="select-all-compounds">All on page</label>
+                    </div>
+                    <div class="vr"></div>
+                    <span class="text-muted small">Top:</span>
+                    {% for n in [50, 100, 200, 500, 1000] %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary btn-select-top" data-n="{{ n }}">{{ n }}</button>
+                    {% endfor %}
+                    <div class="input-group input-group-sm" style="width:140px;">
+                        <input type="number" class="form-control" id="top-n-custom"
+                               placeholder="Custom" min="1" max="{{ pagination.total_items }}">
+                        <button type="button" class="btn btn-outline-secondary" id="btn-top-n-custom">Go</button>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-clear-selection">Clear</button>
+                </div>
+
+                <!-- Line 2: Specific ranks -->
+                <div class="d-flex align-items-start gap-2">
+                    <span class="text-muted small text-nowrap mt-1">Specific ranks:</span>
+                    <div>
+                        <input type="text" class="form-control form-control-sm" id="rank-list-input"
+                               placeholder="e.g. 17902,18663,28148" style="width:280px;">
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="btn-rank-list">Select</button>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Dock action — separated on the right -->
+            <div class="ms-4 border-start ps-4">
+                <button type="button" class="btn btn-primary" id="btn-dock-selected" disabled>
+                    <i class="bi bi-bullseye me-1"></i>Dock Selected<br>
+                    <small>(<span id="selected-count">0</span> compounds)</small>
+                </button>
+            </div>
         </div>
-        <span class="text-muted small ms-2">Select top:</span>
-        {% for n in [50, 100, 200, 500, 1000] %}
-        <button type="button" class="btn btn-sm btn-outline-secondary btn-select-top" data-n="{{ n }}">{{ n }}</button>
-        {% endfor %}
-        <div class="input-group input-group-sm" style="width:150px;">
-            <input type="number" class="form-control" id="top-n-custom"
-                   placeholder="Custom" min="1" max="{{ pagination.total_items }}">
-            <button type="button" class="btn btn-outline-secondary" id="btn-top-n-custom">Go</button>
-        </div>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-clear-selection">Clear</button>
-    </div>
-    <!-- Row 2: specific ranks -->
-    <div class="d-flex align-items-center gap-2 mb-2">
-        <span class="text-muted small text-nowrap">Specific ranks:</span>
-        <input type="text" class="form-control form-control-sm" id="rank-list-input"
-               placeholder="e.g. 17902,18663,28148"
-               style="max-width:320px;"
-               title="Enter comma-separated rank numbers to dock specific compounds">
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-rank-list">Select</button>
-    </div>
-    <!-- Row 3: dock button, right-aligned -->
-    <div class="d-flex justify-content-end">
-        <button type="button" class="btn btn-primary" id="btn-dock-selected" disabled>
-            <i class="bi bi-bullseye me-1"></i>Dock Selected (<span id="selected-count">0</span>)
-        </button>
     </div>
 </div>
 
