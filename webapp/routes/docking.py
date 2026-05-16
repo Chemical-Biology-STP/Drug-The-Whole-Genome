@@ -336,14 +336,6 @@ def results(docking_id: str):
                 rows_by_rank[rank] = row
 
     _merge(record)
-    # Merge from other completed docking jobs for the same screening run
-    for d in docking_store.get_for_user(email):
-        if d.docking_id != docking_id and d.screening_job_id == record.screening_job_id and d.status == "COMPLETED":
-            dx = d.center_x - record.center_x
-            dy = d.center_y - record.center_y
-            dz = d.center_z - record.center_z
-            if math.sqrt(dx*dx + dy*dy + dz*dz) <= 0.5:
-                _merge(d)
 
     rows = sorted(rows_by_rank.values(), key=lambda r: r["docking_score"])
 
