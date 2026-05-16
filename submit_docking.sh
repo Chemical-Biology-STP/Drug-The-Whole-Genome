@@ -510,7 +510,7 @@ autodock_gpu_128wi \
     --filelist "\$BATCH_FILE" \
     --nrun ${NRUN} \
     --xmloutput 0 \
-    --derivtype Si=C,Se=S
+    --derivtype Si=C/Se=S
 
 echo "Chunk \$CHUNK_IDX docking complete."
 CHUNK_EOF
